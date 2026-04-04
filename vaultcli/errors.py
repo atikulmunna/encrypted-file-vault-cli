@@ -11,3 +11,11 @@ class KdfProfileError(VaultCliError):
 
 class KdfInputError(VaultCliError):
     """Raised when KDF inputs are invalid."""
+
+
+class CryptoInputError(VaultCliError):
+    """Raised when cryptographic inputs are invalid."""
+
+
+class CryptoAuthenticationError(VaultCliError):
+    """Raised when authenticated decryption fails."""
