@@ -19,3 +19,7 @@ class CryptoInputError(VaultCliError):
 
 class CryptoAuthenticationError(VaultCliError):
     """Raised when authenticated decryption fails."""
+
+
+class ContainerFormatError(VaultCliError):
+    """Raised when container headers or index data are malformed."""
