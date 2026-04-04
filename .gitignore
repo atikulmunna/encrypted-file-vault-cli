@@ -25,5 +25,6 @@ dist/
 # Editors and OS files
 .DS_Store
 Thumbs.db
+desktop.ini
 .idea/
 .vscode/
