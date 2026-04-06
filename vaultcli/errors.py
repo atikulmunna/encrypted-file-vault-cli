@@ -27,3 +27,7 @@ class ContainerFormatError(VaultCliError):
 
 class VaultFileNotFoundError(VaultCliError):
     """Raised when a requested internal vault path is missing."""
+
+
+class WeakPassphraseError(VaultCliError):
+    """Raised when a passphrase is rejected by policy."""

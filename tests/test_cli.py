@@ -157,7 +157,10 @@ def test_extract_all_command_recovers_directory_tree(tmp_path: Path) -> None:
     (nested_dir / "nested.txt").write_text("nested", encoding="utf-8")
     output_dir = tmp_path / "out"
 
-    create_result = runner.invoke(app, ["create", str(vault_path), "--passphrase", "tree-pass"])
+    create_result = runner.invoke(
+        app,
+        ["create", str(vault_path), "--passphrase", "tree-passphrase"],
+    )
     assert create_result.exit_code == 0
 
     add_result = runner.invoke(
@@ -167,7 +170,7 @@ def test_extract_all_command_recovers_directory_tree(tmp_path: Path) -> None:
             str(vault_path),
             str(source_dir),
             "--passphrase",
-            "tree-pass",
+            "tree-passphrase",
         ],
     )
     assert add_result.exit_code == 0
@@ -179,7 +182,7 @@ def test_extract_all_command_recovers_directory_tree(tmp_path: Path) -> None:
             str(vault_path),
             "--all",
             "--passphrase",
-            "tree-pass",
+            "tree-passphrase",
             "--output",
             str(output_dir),
         ],

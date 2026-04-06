@@ -15,7 +15,12 @@ from vaultcli.container.reader import ContainerReader, ContainerRecord
 from vaultcli.container.writer import ContainerWriteRequest, ContainerWriter
 from vaultcli.crypto.aes_gcm import AES256_KEY_BYTES, EncryptedPayload, EncryptionService
 from vaultcli.crypto.kdf import KdfProfileName, KdfService
-from vaultcli.errors import ContainerFormatError, CryptoAuthenticationError, VaultFileNotFoundError
+from vaultcli.errors import (
+    ContainerFormatError,
+    CryptoAuthenticationError,
+    VaultFileNotFoundError,
+)
+from vaultcli.passphrases import enforce_passphrase_policy
 
 
 INDEX_AAD: Final[bytes] = b"vaultcli:outer-index"
@@ -102,8 +107,10 @@ class VaultService:
         *,
         passphrase: str,
         kdf_profile: KdfProfileName = KdfProfileName.INTERACTIVE,
+        allow_weak_passphrase: bool = False,
     ) -> Path:
         """Create an empty outer-volume vault and write it atomically."""
+        enforce_passphrase_policy(passphrase, allow_weak=allow_weak_passphrase)
         created_at = int(time.time())
         index = VolumeIndex(
             version=1,
@@ -141,6 +148,25 @@ class VaultService:
             encrypted_data=encrypted_data,
         )
         return ContainerWriter.write_atomic(path, request)
+
+    @classmethod
+    def rekey_vault(
+        cls,
+        vault_path: str | Path,
+        *,
+        current_passphrase: str,
+        new_passphrase: str,
+        allow_weak_passphrase: bool = False,
+    ) -> Path:
+        """Re-wrap the existing DEK with a KEK derived from a new passphrase."""
+        enforce_passphrase_policy(new_passphrase, allow_weak=allow_weak_passphrase)
+        unlocked = cls._unlock(Path(vault_path), passphrase=current_passphrase)
+        return cls._write_updated_vault(
+            unlocked,
+            passphrase=new_passphrase,
+            index=unlocked.index,
+            encrypted_data=unlocked.record.encrypted_data,
+        )
 
     @classmethod
     def add_paths(
