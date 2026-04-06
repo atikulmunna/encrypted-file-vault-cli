@@ -1,0 +1,45 @@
+"""Service-level tests for vault add/extract workflows."""
+
+from pathlib import Path
+
+from vaultcli.errors import VaultFileNotFoundError
+from vaultcli.vault import VaultService
+
+
+def test_vault_service_add_and_extract_round_trip(tmp_path: Path) -> None:
+    vault_path = tmp_path / "service.vault"
+    source_file = tmp_path / "secret.txt"
+    source_file.write_text("hello from vault service", encoding="utf-8")
+
+    VaultService.create_empty_vault(vault_path, passphrase="service-pass")
+    added = VaultService.add_paths(vault_path, passphrase="service-pass", sources=[source_file])
+
+    output_dir = tmp_path / "out"
+    extracted = VaultService.extract_files(
+        vault_path,
+        passphrase="service-pass",
+        output_dir=output_dir,
+        internal_path="secret.txt",
+    )
+
+    assert len(added) == 1
+    assert added[0].path == "secret.txt"
+    assert len(extracted) == 1
+    assert extracted[0].output_path.read_text(encoding="utf-8") == "hello from vault service"
+
+
+def test_vault_service_extract_missing_file_raises(tmp_path: Path) -> None:
+    vault_path = tmp_path / "service.vault"
+    VaultService.create_empty_vault(vault_path, passphrase="service-pass")
+
+    try:
+        VaultService.extract_files(
+            vault_path,
+            passphrase="service-pass",
+            output_dir=tmp_path / "out",
+            internal_path="missing.txt",
+        )
+    except VaultFileNotFoundError:
+        pass
+    else:
+        raise AssertionError("Expected missing internal path to raise VaultFileNotFoundError")

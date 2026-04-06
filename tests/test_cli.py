@@ -92,3 +92,98 @@ def test_list_command_returns_empty_file_list_for_new_vault(tmp_path: Path) -> N
     payload = json.loads(list_result.stdout)
     assert payload["active_volume"] == "outer"
     assert payload["files"] == []
+
+
+def test_add_and_extract_commands_round_trip_file(tmp_path: Path) -> None:
+    vault_path = tmp_path / "roundtrip.vault"
+    source_file = tmp_path / "note.txt"
+    source_file.write_text("vault round trip", encoding="utf-8")
+    output_dir = tmp_path / "extract"
+
+    create_result = runner.invoke(
+        app,
+        ["create", str(vault_path), "--passphrase", "vault-passphrase"],
+    )
+    assert create_result.exit_code == 0
+
+    add_result = runner.invoke(
+        app,
+        [
+            "--json",
+            "add",
+            str(vault_path),
+            str(source_file),
+            "--passphrase",
+            "vault-passphrase",
+        ],
+    )
+    assert add_result.exit_code == 0
+    add_payload = json.loads(add_result.stdout)
+    assert add_payload["added"][0]["path"] == "note.txt"
+
+    list_result = runner.invoke(
+        app,
+        ["--json", "list", str(vault_path), "--passphrase", "vault-passphrase"],
+    )
+    assert list_result.exit_code == 0
+    list_payload = json.loads(list_result.stdout)
+    assert list_payload["files"][0]["path"] == "note.txt"
+
+    extract_result = runner.invoke(
+        app,
+        [
+            "--json",
+            "extract",
+            str(vault_path),
+            "note.txt",
+            "--passphrase",
+            "vault-passphrase",
+            "--output",
+            str(output_dir),
+        ],
+    )
+    assert extract_result.exit_code == 0
+    extract_payload = json.loads(extract_result.stdout)
+    assert extract_payload["extracted"][0]["path"] == "note.txt"
+    assert (output_dir / "note.txt").read_text(encoding="utf-8") == "vault round trip"
+
+
+def test_extract_all_command_recovers_directory_tree(tmp_path: Path) -> None:
+    vault_path = tmp_path / "tree.vault"
+    source_dir = tmp_path / "source"
+    nested_dir = source_dir / "docs"
+    nested_dir.mkdir(parents=True)
+    (source_dir / "root.txt").write_text("root", encoding="utf-8")
+    (nested_dir / "nested.txt").write_text("nested", encoding="utf-8")
+    output_dir = tmp_path / "out"
+
+    create_result = runner.invoke(app, ["create", str(vault_path), "--passphrase", "tree-pass"])
+    assert create_result.exit_code == 0
+
+    add_result = runner.invoke(
+        app,
+        [
+            "add",
+            str(vault_path),
+            str(source_dir),
+            "--passphrase",
+            "tree-pass",
+        ],
+    )
+    assert add_result.exit_code == 0
+
+    extract_result = runner.invoke(
+        app,
+        [
+            "extract",
+            str(vault_path),
+            "--all",
+            "--passphrase",
+            "tree-pass",
+            "--output",
+            str(output_dir),
+        ],
+    )
+    assert extract_result.exit_code == 0
+    assert (output_dir / "source" / "root.txt").read_text(encoding="utf-8") == "root"
+    assert (output_dir / "source" / "docs" / "nested.txt").read_text(encoding="utf-8") == "nested"

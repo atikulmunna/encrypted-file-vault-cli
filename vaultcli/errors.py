@@ -23,3 +23,7 @@ class CryptoAuthenticationError(VaultCliError):
 
 class ContainerFormatError(VaultCliError):
     """Raised when container headers or index data are malformed."""
+
+
+class VaultFileNotFoundError(VaultCliError):
+    """Raised when a requested internal vault path is missing."""
