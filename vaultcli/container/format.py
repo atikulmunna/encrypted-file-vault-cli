@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import struct
+from typing import cast
 
 from vaultcli.crypto.kdf import KdfProfileName
 from vaultcli.errors import ContainerFormatError
@@ -14,6 +15,15 @@ FORMAT_VERSION = 1
 PUBLIC_HEADER_STRUCT = struct.Struct(">8sHBBQ12s")
 PUBLIC_HEADER_SIZE = PUBLIC_HEADER_STRUCT.size
 RESERVED_BYTES = b"\x00" * 12
+OUTER_SALT_BYTES = 32
+DEK_NONCE_BYTES = 12
+WRAPPED_DEK_BYTES = 48
+INDEX_SIZE_BYTES = 4
+OUTER_SALT_OFFSET = PUBLIC_HEADER_SIZE
+OUTER_DEK_NONCE_OFFSET = OUTER_SALT_OFFSET + OUTER_SALT_BYTES
+WRAPPED_DEK_OFFSET = OUTER_DEK_NONCE_OFFSET + DEK_NONCE_BYTES
+INDEX_SIZE_OFFSET = WRAPPED_DEK_OFFSET + WRAPPED_DEK_BYTES
+INDEX_DATA_OFFSET = INDEX_SIZE_OFFSET + INDEX_SIZE_BYTES
 
 KDF_PROFILE_IDS: dict[KdfProfileName, int] = {
     KdfProfileName.INTERACTIVE: 0x00,
@@ -88,3 +98,19 @@ def parse_public_header(data: bytes) -> PublicHeader:
         kdf_profile=kdf_profile,
         container_size=container_size,
     )
+
+
+def pack_index_size(size: int) -> bytes:
+    """Pack an encrypted-index size field."""
+    if not 0 <= size <= 0xFFFFFFFF:
+        raise ContainerFormatError("Encrypted index size must fit in 4 bytes.")
+    return struct.pack(">I", size)
+
+
+def parse_index_size(data: bytes) -> int:
+    """Parse a 4-byte encrypted-index size field."""
+    if len(data) != INDEX_SIZE_BYTES:
+        raise ContainerFormatError(
+            f"Encrypted index size field must be exactly {INDEX_SIZE_BYTES} bytes."
+        )
+    return cast(int, struct.unpack(">I", data)[0])
