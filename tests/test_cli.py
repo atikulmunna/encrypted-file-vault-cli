@@ -187,3 +187,47 @@ def test_extract_all_command_recovers_directory_tree(tmp_path: Path) -> None:
     assert extract_result.exit_code == 0
     assert (output_dir / "source" / "root.txt").read_text(encoding="utf-8") == "root"
     assert (output_dir / "source" / "docs" / "nested.txt").read_text(encoding="utf-8") == "nested"
+
+
+def test_verify_command_supports_locked_and_unlocked_modes(tmp_path: Path) -> None:
+    vault_path = tmp_path / "verify.vault"
+    source_file = tmp_path / "secret.txt"
+    source_file.write_text("verify me", encoding="utf-8")
+
+    create_result = runner.invoke(app, ["create", str(vault_path), "--passphrase", "verify-pass"])
+    assert create_result.exit_code == 0
+
+    add_result = runner.invoke(
+        app,
+        ["add", str(vault_path), str(source_file), "--passphrase", "verify-pass"],
+    )
+    assert add_result.exit_code == 0
+
+    locked_result = runner.invoke(app, ["--json", "verify", str(vault_path), "--locked"])
+    unlocked_result = runner.invoke(
+        app,
+        ["--json", "verify", str(vault_path), "--passphrase", "verify-pass"],
+    )
+
+    assert locked_result.exit_code == 0
+    assert unlocked_result.exit_code == 0
+
+    locked_payload = json.loads(locked_result.stdout)
+    unlocked_payload = json.loads(unlocked_result.stdout)
+
+    assert locked_payload["mode"] == "locked"
+    assert unlocked_payload["mode"] == "unlocked"
+    assert unlocked_payload["active_volume"] == "outer"
+    assert unlocked_payload["checked_files"] == 1
+    assert unlocked_payload["checked_chunks"] == 1
+
+
+def test_verify_command_requires_passphrase_without_locked_mode(tmp_path: Path) -> None:
+    vault_path = tmp_path / "verify-required.vault"
+    create_result = runner.invoke(app, ["create", str(vault_path), "--passphrase", "verify-pass"])
+    assert create_result.exit_code == 0
+
+    verify_result = runner.invoke(app, ["verify", str(vault_path)])
+
+    assert verify_result.exit_code != 0
+    assert "Pass --passphrase" in verify_result.stderr
