@@ -72,6 +72,17 @@ class ExtractedVaultFile:
 
 
 @dataclass(frozen=True, slots=True)
+class VerificationResult:
+    """Result of a vault verification run."""
+
+    mode: str
+    active_volume: str | None
+    status: str
+    checked_files: int
+    checked_chunks: int
+
+
+@dataclass(frozen=True, slots=True)
 class UnlockedVault:
     """Unlocked outer-volume material needed for authenticated operations."""
 
@@ -218,6 +229,39 @@ class VaultService:
             )
 
         return extracted
+
+    @classmethod
+    def verify_locked(cls, path: str | Path) -> VerificationResult:
+        """Perform a structural-only verification without authenticating ciphertext."""
+        record = ContainerReader.read_path(path)
+        if len(record.encrypted_index) <= 12:
+            raise ContainerFormatError("Encrypted index payload is too small to contain a nonce.")
+
+        return VerificationResult(
+            mode="locked",
+            active_volume=None,
+            status="verified",
+            checked_files=0,
+            checked_chunks=0,
+        )
+
+    @classmethod
+    def verify_unlocked(cls, path: str | Path, *, passphrase: str) -> VerificationResult:
+        """Perform authenticated verification of the active outer volume."""
+        unlocked = cls._unlock(Path(path), passphrase=passphrase)
+        checked_chunks = 0
+
+        for file_record in unlocked.index.files:
+            cls._decrypt_file(file_record, unlocked.record.encrypted_data, unlocked.dek)
+            checked_chunks += len(file_record.chunks)
+
+        return VerificationResult(
+            mode="unlocked",
+            active_volume="outer",
+            status="verified",
+            checked_files=len(unlocked.index.files),
+            checked_chunks=checked_chunks,
+        )
 
     @classmethod
     def read_locked_info(cls, path: str | Path) -> LockedVaultInfo:

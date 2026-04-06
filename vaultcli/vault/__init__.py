@@ -6,6 +6,7 @@ from vaultcli.vault.vault import (
     ListedVaultFile,
     LockedVaultInfo,
     UnlockedVaultInfo,
+    VerificationResult,
     VaultService,
 )
 
@@ -15,5 +16,6 @@ __all__ = [
     "ListedVaultFile",
     "LockedVaultInfo",
     "UnlockedVaultInfo",
+    "VerificationResult",
     "VaultService",
 ]
