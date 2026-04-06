@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import cast
 
 import msgpack
 
@@ -73,7 +74,7 @@ def serialize_index(index: VolumeIndex) -> bytes:
         ],
     }
 
-    return msgpack.packb(payload, use_bin_type=True)
+    return cast(bytes, msgpack.packb(payload, use_bin_type=True))
 
 
 def deserialize_index(data: bytes) -> VolumeIndex:
