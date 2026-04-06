@@ -234,3 +234,77 @@ def test_verify_command_requires_passphrase_without_locked_mode(tmp_path: Path) 
 
     assert verify_result.exit_code != 0
     assert "Pass --passphrase" in verify_result.stderr
+
+
+def test_rekey_command_updates_vault_passphrase(tmp_path: Path) -> None:
+    vault_path = tmp_path / "rekey.vault"
+    source_file = tmp_path / "secret.txt"
+    source_file.write_text("still there after rekey", encoding="utf-8")
+
+    create_result = runner.invoke(
+        app,
+        ["create", str(vault_path), "--passphrase", "OldPassphrase123!"],
+    )
+    assert create_result.exit_code == 0
+
+    add_result = runner.invoke(
+        app,
+        ["add", str(vault_path), str(source_file), "--passphrase", "OldPassphrase123!"],
+    )
+    assert add_result.exit_code == 0
+
+    rekey_result = runner.invoke(
+        app,
+        [
+            "--json",
+            "rekey",
+            str(vault_path),
+            "--current-passphrase",
+            "OldPassphrase123!",
+            "--new-passphrase",
+            "NewPassphrase123!",
+        ],
+    )
+    assert rekey_result.exit_code == 0
+    rekey_payload = json.loads(rekey_result.stdout)
+    assert rekey_payload["status"] == "rekeyed"
+
+    old_list_result = runner.invoke(
+        app,
+        ["list", str(vault_path), "--passphrase", "OldPassphrase123!"],
+    )
+    assert old_list_result.exit_code != 0
+
+    new_list_result = runner.invoke(
+        app,
+        ["--json", "list", str(vault_path), "--passphrase", "NewPassphrase123!"],
+    )
+    assert new_list_result.exit_code == 0
+    new_list_payload = json.loads(new_list_result.stdout)
+    assert new_list_payload["files"][0]["path"] == "secret.txt"
+
+
+def test_rekey_command_supports_weak_override(tmp_path: Path) -> None:
+    vault_path = tmp_path / "rekey-weak.vault"
+    create_result = runner.invoke(
+        app,
+        ["create", str(vault_path), "--passphrase", "OldPassphrase123!"],
+    )
+    assert create_result.exit_code == 0
+
+    rekey_result = runner.invoke(
+        app,
+        [
+            "--json",
+            "rekey",
+            str(vault_path),
+            "--current-passphrase",
+            "OldPassphrase123!",
+            "--new-passphrase",
+            "weakpass",
+            "--allow-weak-passphrase",
+        ],
+    )
+    assert rekey_result.exit_code == 0
+    payload = json.loads(rekey_result.stdout)
+    assert payload["status"] == "rekeyed"
