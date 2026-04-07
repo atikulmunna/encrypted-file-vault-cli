@@ -31,3 +31,7 @@ class VaultFileNotFoundError(VaultCliError):
 
 class WeakPassphraseError(VaultCliError):
     """Raised when a passphrase is rejected by policy."""
+
+
+class WipeError(VaultCliError):
+    """Raised when a wipe operation cannot be completed safely."""
