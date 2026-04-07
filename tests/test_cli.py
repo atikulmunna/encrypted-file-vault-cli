@@ -308,3 +308,17 @@ def test_rekey_command_supports_weak_override(tmp_path: Path) -> None:
     assert rekey_result.exit_code == 0
     payload = json.loads(rekey_result.stdout)
     assert payload["status"] == "rekeyed"
+
+
+def test_wipe_command_removes_file(tmp_path: Path) -> None:
+    target = tmp_path / "wipe.txt"
+    target.write_text("delete me", encoding="utf-8")
+
+    wipe_result = runner.invoke(app, ["--json", "wipe", str(target), "--passes", "2"])
+
+    assert wipe_result.exit_code == 0
+    payload = json.loads(wipe_result.stdout)
+    assert payload["status"] == "wiped"
+    assert payload["passes"] == 2
+    assert "SSD and flash storage" in payload["warning"]
+    assert not target.exists()
