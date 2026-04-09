@@ -22,7 +22,12 @@ from vaultcli.errors import (
     VaultFileNotFoundError,
 )
 from vaultcli.passphrases import enforce_passphrase_policy
-from vaultcli.vault.hidden import build_hidden_region
+from vaultcli.vault.hidden import (
+    UnlockedHiddenRegion,
+    build_hidden_region,
+    serialize_hidden_region,
+    unlock_hidden_region,
+)
 
 
 INDEX_AAD: Final[bytes] = b"vaultcli:outer-index"
@@ -99,6 +104,14 @@ class UnlockedVault:
     index: VolumeIndex
     outer_encrypted_data: bytes
     hidden_region: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class UnlockedHiddenVault:
+    """Unlocked hidden-volume material plus the outer container context."""
+
+    outer: UnlockedVault
+    hidden: UnlockedHiddenRegion
 
 
 class VaultService:
@@ -254,6 +267,53 @@ class VaultService:
         return added_files
 
     @classmethod
+    def add_hidden_paths(
+        cls,
+        vault_path: str | Path,
+        *,
+        outer_passphrase: str,
+        inner_passphrase: str,
+        sources: Sequence[str | Path],
+    ) -> list[AddedVaultFile]:
+        """Encrypt and add files or directories to the hidden volume."""
+        unlocked = cls._unlock_hidden(Path(vault_path), outer_passphrase=outer_passphrase, inner_passphrase=inner_passphrase)
+        encrypted_data = bytearray(unlocked.hidden.encrypted_data)
+        files_by_path = {file.path: file for file in unlocked.hidden.index.files}
+        added_files: list[AddedVaultFile] = []
+        now = int(time.time())
+
+        for source in sources:
+            for internal_path, source_path in _iter_source_files(Path(source)):
+                plaintext = source_path.read_bytes()
+                file_record = cls._encrypt_file(
+                    internal_path=internal_path,
+                    plaintext=plaintext,
+                    dek=unlocked.hidden.dek,
+                    encrypted_data=encrypted_data,
+                    added_at=now,
+                )
+                files_by_path[internal_path] = file_record
+                added_files.append(
+                    AddedVaultFile(path=internal_path, original_size=file_record.original_size)
+                )
+
+        created_at = unlocked.hidden.index.created_at or now
+        new_index = VolumeIndex(
+            version=unlocked.hidden.index.version,
+            created_at=created_at,
+            reserved_tail_start=None,
+            files=tuple(sorted(files_by_path.values(), key=lambda item: item.path)),
+        )
+        cls._write_updated_hidden_volume(
+            unlocked,
+            outer_passphrase=outer_passphrase,
+            inner_passphrase=inner_passphrase,
+            index=new_index,
+            hidden_encrypted_data=bytes(encrypted_data),
+        )
+        return added_files
+
+    @classmethod
     def extract_files(
         cls,
         vault_path: str | Path,
@@ -280,6 +340,55 @@ class VaultService:
         extracted: list[ExtractedVaultFile] = []
         for file_record in selected:
             plaintext = cls._decrypt_file(file_record, unlocked.outer_encrypted_data, unlocked.dek)
+            destination = target_dir / Path(file_record.path)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            if destination.exists() and not overwrite:
+                raise ContainerFormatError(
+                    f"Refusing to overwrite existing file without --overwrite: {destination}"
+                )
+            destination.write_bytes(plaintext)
+            extracted.append(
+                ExtractedVaultFile(
+                    path=file_record.path,
+                    output_path=destination,
+                    original_size=file_record.original_size,
+                )
+            )
+
+        return extracted
+
+    @classmethod
+    def extract_hidden_files(
+        cls,
+        vault_path: str | Path,
+        *,
+        outer_passphrase: str,
+        inner_passphrase: str,
+        output_dir: str | Path,
+        internal_path: str | None = None,
+        extract_all: bool = False,
+        overwrite: bool = False,
+    ) -> list[ExtractedVaultFile]:
+        """Decrypt one or all files from the hidden volume to disk."""
+        if not extract_all and internal_path is None:
+            raise ContainerFormatError("Specify an internal path or use --all.")
+
+        unlocked = cls._unlock_hidden(
+            Path(vault_path),
+            outer_passphrase=outer_passphrase,
+            inner_passphrase=inner_passphrase,
+        )
+        target_dir = Path(output_dir)
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        if extract_all:
+            selected = list(unlocked.hidden.index.files)
+        else:
+            selected = [cls._get_file_record(unlocked.hidden.index, internal_path or "")]
+
+        extracted: list[ExtractedVaultFile] = []
+        for file_record in selected:
+            plaintext = cls._decrypt_file(file_record, unlocked.hidden.encrypted_data, unlocked.hidden.dek)
             destination = target_dir / Path(file_record.path)
             destination.parent.mkdir(parents=True, exist_ok=True)
             if destination.exists() and not overwrite:
@@ -370,6 +479,29 @@ class VaultService:
         ]
 
     @classmethod
+    def list_hidden_files(
+        cls,
+        path: str | Path,
+        *,
+        outer_passphrase: str,
+        inner_passphrase: str,
+    ) -> list[ListedVaultFile]:
+        """List authenticated file metadata for the hidden volume."""
+        unlocked = cls._unlock_hidden(
+            Path(path),
+            outer_passphrase=outer_passphrase,
+            inner_passphrase=inner_passphrase,
+        )
+        return [
+            ListedVaultFile(
+                path=file.path,
+                original_size=file.original_size,
+                added_at=file.added_at,
+            )
+            for file in unlocked.hidden.index.files
+        ]
+
+    @classmethod
     def _unlock(cls, path: Path, *, passphrase: str) -> UnlockedVault:
         record = ContainerReader.read_path(path)
         dek = cls._unwrap_dek(record, passphrase=passphrase)
@@ -383,6 +515,25 @@ class VaultService:
             outer_encrypted_data=outer_encrypted_data,
             hidden_region=hidden_region,
         )
+
+    @classmethod
+    def _unlock_hidden(
+        cls,
+        path: Path,
+        *,
+        outer_passphrase: str,
+        inner_passphrase: str,
+    ) -> UnlockedHiddenVault:
+        outer = cls._unlock(path, passphrase=outer_passphrase)
+        if not outer.hidden_region:
+            raise HiddenVolumeError("No hidden volume is configured for this vault.")
+
+        hidden = unlock_hidden_region(
+            outer.hidden_region,
+            passphrase=inner_passphrase,
+            kdf_profile=outer.record.header.kdf_profile,
+        )
+        return UnlockedHiddenVault(outer=outer, hidden=hidden)
 
     @classmethod
     def _unwrap_dek(cls, record: ContainerRecord, *, passphrase: str) -> bytes:
@@ -452,6 +603,33 @@ class VaultService:
             encrypted_data=combined_data,
         )
         return ContainerWriter.write_atomic(unlocked.path, request)
+
+    @classmethod
+    def _write_updated_hidden_volume(
+        cls,
+        unlocked: UnlockedHiddenVault,
+        *,
+        outer_passphrase: str,
+        inner_passphrase: str,
+        index: VolumeIndex,
+        hidden_encrypted_data: bytes,
+    ) -> Path:
+        hidden_region = serialize_hidden_region(
+            passphrase=inner_passphrase,
+            kdf_profile=unlocked.outer.record.header.kdf_profile,
+            dek=unlocked.hidden.dek,
+            index=index,
+            encrypted_data=hidden_encrypted_data,
+            total_size=unlocked.hidden.record.total_size,
+            salt=unlocked.hidden.record.salt,
+        )
+        return cls._write_updated_vault(
+            unlocked.outer,
+            passphrase=outer_passphrase,
+            index=unlocked.outer.index,
+            outer_encrypted_data=unlocked.outer.outer_encrypted_data,
+            hidden_region=hidden_region,
+        )
 
     @classmethod
     def _encrypt_file(

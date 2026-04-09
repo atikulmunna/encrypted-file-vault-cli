@@ -1,4 +1,4 @@
-"""Service-level tests for hidden-volume foundation behavior."""
+"""Service-level tests for hidden-volume behavior."""
 
 from pathlib import Path
 
@@ -70,3 +70,97 @@ def test_outer_add_preserves_hidden_region_bytes(tmp_path: Path) -> None:
     after_unlock = VaultService._unlock(vault_path, passphrase="OuterPassphrase123!")
     assert after_unlock.hidden_region == before_hidden
     assert len(after_unlock.hidden_region) == len(before_hidden)
+
+
+def test_hidden_add_list_and_extract_round_trip(tmp_path: Path) -> None:
+    vault_path = tmp_path / "hidden-roundtrip.vault"
+    hidden_source = tmp_path / "inner.txt"
+    hidden_source.write_text("inside hidden volume", encoding="utf-8")
+
+    VaultService.create_empty_vault(vault_path, passphrase="OuterPassphrase123!")
+    VaultService.create_hidden_volume(
+        vault_path,
+        outer_passphrase="OuterPassphrase123!",
+        inner_passphrase="InnerPassphrase123!",
+        hidden_size=2048,
+    )
+
+    added = VaultService.add_hidden_paths(
+        vault_path,
+        outer_passphrase="OuterPassphrase123!",
+        inner_passphrase="InnerPassphrase123!",
+        sources=[hidden_source],
+    )
+    listed = VaultService.list_hidden_files(
+        vault_path,
+        outer_passphrase="OuterPassphrase123!",
+        inner_passphrase="InnerPassphrase123!",
+    )
+    extracted = VaultService.extract_hidden_files(
+        vault_path,
+        outer_passphrase="OuterPassphrase123!",
+        inner_passphrase="InnerPassphrase123!",
+        output_dir=tmp_path / "out",
+        internal_path="inner.txt",
+    )
+
+    assert added[0].path == "inner.txt"
+    assert listed[0].path == "inner.txt"
+    assert extracted[0].output_path.read_text(encoding="utf-8") == "inside hidden volume"
+
+
+def test_hidden_add_does_not_change_outer_file_listing(tmp_path: Path) -> None:
+    vault_path = tmp_path / "hidden-isolated.vault"
+    outer_source = tmp_path / "outer.txt"
+    hidden_source = tmp_path / "hidden.txt"
+    outer_source.write_text("outer file", encoding="utf-8")
+    hidden_source.write_text("hidden file", encoding="utf-8")
+
+    VaultService.create_empty_vault(vault_path, passphrase="OuterPassphrase123!")
+    VaultService.add_paths(vault_path, passphrase="OuterPassphrase123!", sources=[outer_source])
+    VaultService.create_hidden_volume(
+        vault_path,
+        outer_passphrase="OuterPassphrase123!",
+        inner_passphrase="InnerPassphrase123!",
+        hidden_size=2048,
+    )
+
+    VaultService.add_hidden_paths(
+        vault_path,
+        outer_passphrase="OuterPassphrase123!",
+        inner_passphrase="InnerPassphrase123!",
+        sources=[hidden_source],
+    )
+
+    outer_files = VaultService.list_files(vault_path, passphrase="OuterPassphrase123!")
+    hidden_files = VaultService.list_hidden_files(
+        vault_path,
+        outer_passphrase="OuterPassphrase123!",
+        inner_passphrase="InnerPassphrase123!",
+    )
+
+    assert [item.path for item in outer_files] == ["outer.txt"]
+    assert [item.path for item in hidden_files] == ["hidden.txt"]
+
+
+def test_hidden_operations_require_configured_hidden_volume(tmp_path: Path) -> None:
+    vault_path = tmp_path / "no-hidden.vault"
+    source_file = tmp_path / "note.txt"
+    source_file.write_text("no hidden here", encoding="utf-8")
+
+    VaultService.create_empty_vault(vault_path, passphrase="OuterPassphrase123!")
+
+    with pytest.raises(HiddenVolumeError):
+        VaultService.list_hidden_files(
+            vault_path,
+            outer_passphrase="OuterPassphrase123!",
+            inner_passphrase="InnerPassphrase123!",
+        )
+
+    with pytest.raises(HiddenVolumeError):
+        VaultService.add_hidden_paths(
+            vault_path,
+            outer_passphrase="OuterPassphrase123!",
+            inner_passphrase="InnerPassphrase123!",
+            sources=[source_file],
+        )
