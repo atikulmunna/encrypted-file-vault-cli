@@ -30,6 +30,7 @@ class ContainerRecord:
     outer_salt: bytes
     wrapped_dek: EncryptedPayload
     encrypted_index: bytes
+    encrypted_data_offset: int
     encrypted_data: bytes
 
 
@@ -71,6 +72,7 @@ class ContainerReader:
                 ciphertext=wrapped_dek_ciphertext,
             ),
             encrypted_index=encrypted_index,
+            encrypted_data_offset=index_end,
             encrypted_data=encrypted_data,
         )
 

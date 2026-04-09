@@ -35,3 +35,7 @@ class WeakPassphraseError(VaultCliError):
 
 class WipeError(VaultCliError):
     """Raised when a wipe operation cannot be completed safely."""
+
+
+class HiddenVolumeError(VaultCliError):
+    """Raised when hidden-volume creation or boundary rules fail."""
