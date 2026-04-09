@@ -43,10 +43,10 @@ def test_create_command_creates_vault_file(tmp_path: Path) -> None:
 
 
 def test_hidden_subcommand_is_registered() -> None:
-    result = runner.invoke(app, ["hidden", "create"])
+    result = runner.invoke(app, ["hidden", "create", "--help"])
 
     assert result.exit_code == 0
-    assert "hidden create" in result.stdout
+    assert "Create a hidden volume." in result.stdout
 
 
 def test_info_command_supports_locked_and_unlocked_modes(tmp_path: Path) -> None:
@@ -322,3 +322,37 @@ def test_wipe_command_removes_file(tmp_path: Path) -> None:
     assert payload["passes"] == 2
     assert "SSD and flash storage" in payload["warning"]
     assert not target.exists()
+
+
+def test_hidden_create_command_reserves_hidden_region(tmp_path: Path) -> None:
+    vault_path = tmp_path / "hidden-cli.vault"
+    create_result = runner.invoke(
+        app,
+        ["create", str(vault_path), "--passphrase", "OuterPassphrase123!"],
+    )
+    assert create_result.exit_code == 0
+
+    hidden_result = runner.invoke(
+        app,
+        [
+            "--json",
+            "hidden",
+            "create",
+            str(vault_path),
+            "--hidden-size",
+            "512",
+            "--outer-passphrase",
+            "OuterPassphrase123!",
+            "--inner-passphrase",
+            "InnerPassphrase123!",
+        ],
+    )
+    assert hidden_result.exit_code == 0
+    payload = json.loads(hidden_result.stdout)
+    assert payload["status"] == "created"
+    assert payload["hidden_size"] == 512
+
+    info_result = runner.invoke(app, ["--json", "info", str(vault_path)])
+    assert info_result.exit_code == 0
+    info_payload = json.loads(info_result.stdout)
+    assert info_payload["mode"] == "locked"
