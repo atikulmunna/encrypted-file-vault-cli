@@ -244,10 +244,9 @@ class VaultService:
 
         for source in sources:
             for internal_path, source_path in _iter_source_files(Path(source)):
-                plaintext = source_path.read_bytes()
-                file_record = cls._encrypt_file(
+                file_record = cls._encrypt_file_from_path(
                     internal_path=internal_path,
-                    plaintext=plaintext,
+                    source_path=source_path,
                     dek=unlocked.dek,
                     encrypted_data=encrypted_data,
                     added_at=now,
@@ -294,10 +293,9 @@ class VaultService:
 
         for source in sources:
             for internal_path, source_path in _iter_source_files(Path(source)):
-                plaintext = source_path.read_bytes()
-                file_record = cls._encrypt_file(
+                file_record = cls._encrypt_file_from_path(
                     internal_path=internal_path,
-                    plaintext=plaintext,
+                    source_path=source_path,
                     dek=unlocked.hidden.dek,
                     encrypted_data=encrypted_data,
                     added_at=now,
@@ -349,14 +347,18 @@ class VaultService:
 
         extracted: list[ExtractedVaultFile] = []
         for file_record in selected:
-            plaintext = cls._decrypt_file(file_record, unlocked.outer_encrypted_data, unlocked.dek)
             destination = target_dir / Path(file_record.path)
             destination.parent.mkdir(parents=True, exist_ok=True)
             if destination.exists() and not overwrite:
                 raise ContainerFormatError(
                     f"Refusing to overwrite existing file without --overwrite: {destination}"
                 )
-            destination.write_bytes(plaintext)
+            cls._decrypt_file_to_path(
+                file_record,
+                unlocked.outer_encrypted_data,
+                unlocked.dek,
+                destination,
+            )
             extracted.append(
                 ExtractedVaultFile(
                     path=file_record.path,
@@ -398,18 +400,18 @@ class VaultService:
 
         extracted: list[ExtractedVaultFile] = []
         for file_record in selected:
-            plaintext = cls._decrypt_file(
-                file_record,
-                unlocked.hidden.encrypted_data,
-                unlocked.hidden.dek,
-            )
             destination = target_dir / Path(file_record.path)
             destination.parent.mkdir(parents=True, exist_ok=True)
             if destination.exists() and not overwrite:
                 raise ContainerFormatError(
                     f"Refusing to overwrite existing file without --overwrite: {destination}"
                 )
-            destination.write_bytes(plaintext)
+            cls._decrypt_file_to_path(
+                file_record,
+                unlocked.hidden.encrypted_data,
+                unlocked.hidden.dek,
+                destination,
+            )
             extracted.append(
                 ExtractedVaultFile(
                     path=file_record.path,
@@ -648,11 +650,11 @@ class VaultService:
         )
 
     @classmethod
-    def _encrypt_file(
+    def _encrypt_file_from_path(
         cls,
         *,
         internal_path: str,
-        plaintext: bytes,
+        source_path: Path,
         dek: bytes,
         encrypted_data: bytearray,
         added_at: int,
@@ -660,42 +662,66 @@ class VaultService:
     ) -> FileRecord:
         chunks: list[ChunkRecord] = []
         encrypted_size = 0
-        total_chunks = max(1, (len(plaintext) + chunk_size - 1) // chunk_size)
+        original_size = 0
+        digest = sha256()
 
-        for chunk_index in range(total_chunks):
-            start = chunk_index * chunk_size
-            end = start + chunk_size
-            plaintext_chunk = plaintext[start:end]
-            if len(plaintext) == 0:
-                plaintext_chunk = b""
+        with source_path.open("rb") as handle:
+            current_chunk = handle.read(chunk_size)
+            chunk_index = 0
 
-            payload = EncryptionService.encrypt_chunk(
-                dek,
-                plaintext_chunk,
-                _chunk_aad(internal_path, chunk_index, chunk_index == total_chunks - 1),
-            )
-            offset = len(encrypted_data)
-            encrypted_data.extend(payload.ciphertext)
-            chunks.append(
-                ChunkRecord(
-                    nonce=payload.nonce,
-                    offset=offset,
-                    ciphertext_size=len(payload.ciphertext),
+            if current_chunk == b"":
+                payload = EncryptionService.encrypt_chunk(
+                    dek,
+                    b"",
+                    _chunk_aad(internal_path, 0, True),
                 )
-            )
-            encrypted_size += len(payload.ciphertext)
+                offset = len(encrypted_data)
+                encrypted_data.extend(payload.ciphertext)
+                chunks.append(
+                    ChunkRecord(
+                        nonce=payload.nonce,
+                        offset=offset,
+                        ciphertext_size=len(payload.ciphertext),
+                    )
+                )
+                encrypted_size += len(payload.ciphertext)
+            else:
+                while True:
+                    next_chunk = handle.read(chunk_size)
+                    is_final = next_chunk == b""
+                    original_size += len(current_chunk)
+                    digest.update(current_chunk)
 
-            if len(plaintext) == 0:
-                break
+                    payload = EncryptionService.encrypt_chunk(
+                        dek,
+                        current_chunk,
+                        _chunk_aad(internal_path, chunk_index, is_final),
+                    )
+                    offset = len(encrypted_data)
+                    encrypted_data.extend(payload.ciphertext)
+                    chunks.append(
+                        ChunkRecord(
+                            nonce=payload.nonce,
+                            offset=offset,
+                            ciphertext_size=len(payload.ciphertext),
+                        )
+                    )
+                    encrypted_size += len(payload.ciphertext)
+
+                    if is_final:
+                        break
+
+                    current_chunk = next_chunk
+                    chunk_index += 1
 
         return FileRecord(
             path=internal_path,
-            original_size=len(plaintext),
+            original_size=original_size,
             encrypted_size=encrypted_size,
             chunk_size=chunk_size,
             chunks=tuple(chunks),
             added_at=added_at,
-            sha256=sha256(plaintext).hexdigest(),
+            sha256=digest.hexdigest(),
         )
 
     @classmethod
@@ -726,6 +752,48 @@ class VaultService:
         if sha256(plaintext).hexdigest() != file_record.sha256:
             raise ContainerFormatError(f"SHA-256 mismatch while extracting {file_record.path}.")
         return plaintext
+
+    @classmethod
+    def _decrypt_file_to_path(
+        cls,
+        file_record: FileRecord,
+        encrypted_data: bytes,
+        dek: bytes,
+        destination: Path,
+    ) -> None:
+        digest = sha256()
+        try:
+            with destination.open("wb") as handle:
+                for chunk_index, chunk in enumerate(file_record.chunks):
+                    start = chunk.offset
+                    end = start + chunk.ciphertext_size
+                    ciphertext = encrypted_data[start:end]
+                    if len(ciphertext) != chunk.ciphertext_size:
+                        raise ContainerFormatError(
+                            f"Encrypted chunk for {file_record.path} is truncated at chunk "
+                            f"{chunk_index}."
+                        )
+
+                    plaintext_chunk = EncryptionService.decrypt_chunk(
+                        dek,
+                        EncryptedPayload(nonce=chunk.nonce, ciphertext=ciphertext),
+                        _chunk_aad(
+                            file_record.path,
+                            chunk_index,
+                            chunk_index == len(file_record.chunks) - 1,
+                        ),
+                    )
+                    digest.update(plaintext_chunk)
+                    handle.write(plaintext_chunk)
+        except Exception:
+            if destination.exists():
+                destination.unlink()
+            raise
+
+        if digest.hexdigest() != file_record.sha256:
+            if destination.exists():
+                destination.unlink()
+            raise ContainerFormatError(f"SHA-256 mismatch while extracting {file_record.path}.")
 
     @staticmethod
     def _get_file_record(index: VolumeIndex, internal_path: str) -> FileRecord:
