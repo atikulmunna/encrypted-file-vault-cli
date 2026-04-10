@@ -7,6 +7,7 @@ from pathlib import Path
 import typer
 
 from vaultcli.cli.output import emit
+from vaultcli.cli.passphrases import resolve_passphrase
 from vaultcli.cli.state import AppState
 from vaultcli.vault import VaultService
 
@@ -20,6 +21,21 @@ def verify_command(
         help="Unlock the vault to verify authenticated contents.",
         hide_input=True,
     ),
+    passphrase_env: str | None = typer.Option(
+        None,
+        "--passphrase-env",
+        help="Environment variable containing the vault passphrase.",
+    ),
+    passphrase_file: Path | None = typer.Option(
+        None,
+        "--passphrase-file",
+        help="Path to a UTF-8 text file containing the vault passphrase.",
+    ),
+    prompt_passphrase: bool = typer.Option(
+        False,
+        "--prompt-passphrase",
+        help="Prompt for the vault passphrase before authenticated verification.",
+    ),
     locked: bool = typer.Option(
         False,
         "--locked",
@@ -31,13 +47,21 @@ def verify_command(
     if locked:
         result = VaultService.verify_locked(vault_path)
     else:
-        if passphrase is None:
+        resolved_passphrase = resolve_passphrase(
+            direct=passphrase,
+            env_name=passphrase_env,
+            file_path=passphrase_file,
+            prompt_text="Vault passphrase",
+            allow_prompt=prompt_passphrase,
+        )
+        if resolved_passphrase is None:
             typer.echo(
-                "Pass --passphrase for authenticated verification or use --locked.",
+                "Pass --passphrase, --passphrase-env, --passphrase-file, "
+                "--prompt-passphrase, or use --locked.",
                 err=True,
             )
             raise typer.Exit(code=2)
-        result = VaultService.verify_unlocked(vault_path, passphrase=passphrase)
+        result = VaultService.verify_unlocked(vault_path, passphrase=resolved_passphrase)
 
     emit(
         {

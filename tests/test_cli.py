@@ -11,6 +11,10 @@ from vaultcli.cli.main import app
 runner = CliRunner()
 
 
+def _load_json_output(output: str) -> dict[str, object]:
+    return json.loads(output[output.find("{") :])
+
+
 def test_root_help_shows_expected_commands() -> None:
     result = runner.invoke(app, ["--help"])
 
@@ -35,7 +39,7 @@ def test_create_command_creates_vault_file(tmp_path: Path) -> None:
     )
 
     assert result.exit_code == 0
-    payload = json.loads(result.stdout)
+    payload = _load_json_output(result.stdout)
     assert payload["command"] == "create"
     assert payload["status"] == "created"
     assert vault_path.exists()
@@ -100,13 +104,30 @@ def test_info_command_supports_locked_and_unlocked_modes(tmp_path: Path) -> None
     assert locked_result.exit_code == 0
     assert unlocked_result.exit_code == 0
 
-    locked_payload = json.loads(locked_result.stdout)
-    unlocked_payload = json.loads(unlocked_result.stdout)
+    locked_payload = _load_json_output(locked_result.stdout)
+    unlocked_payload = _load_json_output(unlocked_result.stdout)
 
     assert locked_payload["mode"] == "locked"
     assert unlocked_payload["mode"] == "unlocked"
     assert unlocked_payload["files"] == 0
     assert unlocked_payload["active_volume"] == "outer"
+
+
+def test_info_command_supports_prompted_unlock(tmp_path: Path) -> None:
+    vault_path = tmp_path / "info-prompt.vault"
+    assert runner.invoke(
+        app,
+        ["create", str(vault_path), "--passphrase", "PromptPassphrase123!"],
+    ).exit_code == 0
+
+    result = runner.invoke(
+        app,
+        ["--json", "info", str(vault_path), "--prompt-passphrase"],
+        input="PromptPassphrase123!\n",
+    )
+
+    assert result.exit_code == 0
+    assert _load_json_output(result.stdout)["mode"] == "unlocked"
 
 
 def test_list_command_returns_empty_file_list_for_new_vault(tmp_path: Path) -> None:
@@ -123,7 +144,7 @@ def test_list_command_returns_empty_file_list_for_new_vault(tmp_path: Path) -> N
     )
 
     assert list_result.exit_code == 0
-    payload = json.loads(list_result.stdout)
+    payload = _load_json_output(list_result.stdout)
     assert payload["active_volume"] == "outer"
     assert payload["files"] == []
 
@@ -152,7 +173,7 @@ def test_add_and_extract_commands_round_trip_file(tmp_path: Path) -> None:
         ],
     )
     assert add_result.exit_code == 0
-    add_payload = json.loads(add_result.stdout)
+    add_payload = _load_json_output(add_result.stdout)
     assert add_payload["added"][0]["path"] == "note.txt"
 
     list_result = runner.invoke(
@@ -160,7 +181,7 @@ def test_add_and_extract_commands_round_trip_file(tmp_path: Path) -> None:
         ["--json", "list", str(vault_path), "--passphrase", "vault-passphrase"],
     )
     assert list_result.exit_code == 0
-    list_payload = json.loads(list_result.stdout)
+    list_payload = _load_json_output(list_result.stdout)
     assert list_payload["files"][0]["path"] == "note.txt"
 
     extract_result = runner.invoke(
@@ -177,7 +198,7 @@ def test_add_and_extract_commands_round_trip_file(tmp_path: Path) -> None:
         ],
     )
     assert extract_result.exit_code == 0
-    extract_payload = json.loads(extract_result.stdout)
+    extract_payload = _load_json_output(extract_result.stdout)
     assert extract_payload["extracted"][0]["path"] == "note.txt"
     assert (output_dir / "note.txt").read_text(encoding="utf-8") == "vault round trip"
 
@@ -297,14 +318,62 @@ def test_verify_command_supports_locked_and_unlocked_modes(tmp_path: Path) -> No
     assert locked_result.exit_code == 0
     assert unlocked_result.exit_code == 0
 
-    locked_payload = json.loads(locked_result.stdout)
-    unlocked_payload = json.loads(unlocked_result.stdout)
+    locked_payload = _load_json_output(locked_result.stdout)
+    unlocked_payload = _load_json_output(unlocked_result.stdout)
 
     assert locked_payload["mode"] == "locked"
     assert unlocked_payload["mode"] == "unlocked"
     assert unlocked_payload["active_volume"] == "outer"
     assert unlocked_payload["checked_files"] == 1
     assert unlocked_payload["checked_chunks"] == 1
+
+
+def test_verify_command_supports_env_and_prompt_sources(tmp_path: Path, monkeypatch) -> None:
+    vault_path = tmp_path / "verify-sources.vault"
+    source_file = tmp_path / "secret.txt"
+    source_file.write_text("verify alt source", encoding="utf-8")
+    monkeypatch.setenv("VAULTCLI_VERIFY_PASSPHRASE", "VerifyPassphrase123!")
+
+    assert runner.invoke(
+        app,
+        [
+            "create",
+            str(vault_path),
+            "--passphrase",
+            "VerifyPassphrase123!",
+        ],
+    ).exit_code == 0
+    assert runner.invoke(
+        app,
+        [
+            "add",
+            str(vault_path),
+            str(source_file),
+            "--passphrase",
+            "VerifyPassphrase123!",
+        ],
+    ).exit_code == 0
+
+    env_result = runner.invoke(
+        app,
+        [
+            "--json",
+            "verify",
+            str(vault_path),
+            "--passphrase-env",
+            "VAULTCLI_VERIFY_PASSPHRASE",
+        ],
+    )
+    prompt_result = runner.invoke(
+        app,
+        ["--json", "verify", str(vault_path), "--prompt-passphrase"],
+        input="VerifyPassphrase123!\n",
+    )
+
+    assert env_result.exit_code == 0
+    assert prompt_result.exit_code == 0
+    assert _load_json_output(env_result.stdout)["status"] == "verified"
+    assert _load_json_output(prompt_result.stdout)["status"] == "verified"
 
 
 def test_verify_command_requires_passphrase_without_locked_mode(tmp_path: Path) -> None:
@@ -315,7 +384,7 @@ def test_verify_command_requires_passphrase_without_locked_mode(tmp_path: Path) 
     verify_result = runner.invoke(app, ["verify", str(vault_path)])
 
     assert verify_result.exit_code != 0
-    assert "Pass --passphrase" in verify_result.stderr
+    assert "--prompt-passphrase" in verify_result.stderr
 
 
 def test_rekey_command_updates_vault_passphrase(tmp_path: Path) -> None:
@@ -348,7 +417,7 @@ def test_rekey_command_updates_vault_passphrase(tmp_path: Path) -> None:
         ],
     )
     assert rekey_result.exit_code == 0
-    rekey_payload = json.loads(rekey_result.stdout)
+    rekey_payload = _load_json_output(rekey_result.stdout)
     assert rekey_payload["status"] == "rekeyed"
 
     old_list_result = runner.invoke(
@@ -362,7 +431,7 @@ def test_rekey_command_updates_vault_passphrase(tmp_path: Path) -> None:
         ["--json", "list", str(vault_path), "--passphrase", "NewPassphrase123!"],
     )
     assert new_list_result.exit_code == 0
-    new_list_payload = json.loads(new_list_result.stdout)
+    new_list_payload = _load_json_output(new_list_result.stdout)
     assert new_list_payload["files"][0]["path"] == "secret.txt"
 
 
@@ -388,7 +457,7 @@ def test_rekey_command_supports_weak_override(tmp_path: Path) -> None:
         ],
     )
     assert rekey_result.exit_code == 0
-    payload = json.loads(rekey_result.stdout)
+    payload = _load_json_output(rekey_result.stdout)
     assert payload["status"] == "rekeyed"
 
 
@@ -438,7 +507,7 @@ def test_wipe_command_removes_file(tmp_path: Path) -> None:
     wipe_result = runner.invoke(app, ["--json", "wipe", str(target), "--passes", "2"])
 
     assert wipe_result.exit_code == 0
-    payload = json.loads(wipe_result.stdout)
+    payload = _load_json_output(wipe_result.stdout)
     assert payload["status"] == "wiped"
     assert payload["passes"] == 2
     assert "SSD and flash storage" in payload["warning"]
@@ -469,13 +538,13 @@ def test_hidden_create_command_reserves_hidden_region(tmp_path: Path) -> None:
         ],
     )
     assert hidden_result.exit_code == 0
-    payload = json.loads(hidden_result.stdout)
+    payload = _load_json_output(hidden_result.stdout)
     assert payload["status"] == "created"
     assert payload["hidden_size"] == 512
 
     info_result = runner.invoke(app, ["--json", "info", str(vault_path)])
     assert info_result.exit_code == 0
-    info_payload = json.loads(info_result.stdout)
+    info_payload = _load_json_output(info_result.stdout)
     assert info_payload["mode"] == "locked"
 
 
@@ -522,7 +591,7 @@ def test_hidden_add_list_and_extract_commands_round_trip_file(tmp_path: Path) ->
         ],
     )
     assert add_result.exit_code == 0
-    add_payload = json.loads(add_result.stdout)
+    add_payload = _load_json_output(add_result.stdout)
     assert add_payload["active_volume"] == "hidden"
     assert add_payload["added"][0]["path"] == "inner.txt"
 
@@ -540,7 +609,7 @@ def test_hidden_add_list_and_extract_commands_round_trip_file(tmp_path: Path) ->
         ],
     )
     assert list_result.exit_code == 0
-    list_payload = json.loads(list_result.stdout)
+    list_payload = _load_json_output(list_result.stdout)
     assert list_payload["active_volume"] == "hidden"
     assert list_payload["files"][0]["path"] == "inner.txt"
 
@@ -561,7 +630,7 @@ def test_hidden_add_list_and_extract_commands_round_trip_file(tmp_path: Path) ->
         ],
     )
     assert extract_result.exit_code == 0
-    extract_payload = json.loads(extract_result.stdout)
+    extract_payload = _load_json_output(extract_result.stdout)
     assert extract_payload["active_volume"] == "hidden"
     assert extract_payload["extracted"][0]["path"] == "inner.txt"
     assert (output_dir / "inner.txt").read_text(encoding="utf-8") == "hidden cli payload"
@@ -630,8 +699,8 @@ def test_hidden_add_does_not_change_outer_cli_listing(tmp_path: Path) -> None:
 
     assert outer_list_result.exit_code == 0
     assert hidden_list_result.exit_code == 0
-    assert json.loads(outer_list_result.stdout)["files"][0]["path"] == "outer.txt"
-    assert json.loads(hidden_list_result.stdout)["files"][0]["path"] == "hidden.txt"
+    assert _load_json_output(outer_list_result.stdout)["files"][0]["path"] == "outer.txt"
+    assert _load_json_output(hidden_list_result.stdout)["files"][0]["path"] == "hidden.txt"
 
 
 def test_hidden_commands_support_env_and_file_passphrases(tmp_path: Path, monkeypatch) -> None:
@@ -696,4 +765,4 @@ def test_hidden_commands_support_env_and_file_passphrases(tmp_path: Path, monkey
         ],
     )
     assert list_result.exit_code == 0
-    assert json.loads(list_result.stdout)["files"][0]["path"] == "hidden.txt"
+    assert _load_json_output(list_result.stdout)["files"][0]["path"] == "hidden.txt"

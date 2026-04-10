@@ -7,6 +7,7 @@ from pathlib import Path
 import typer
 
 from vaultcli.cli.output import emit
+from vaultcli.cli.passphrases import resolve_passphrase
 from vaultcli.cli.state import AppState
 from vaultcli.vault import VaultService
 
@@ -20,10 +21,32 @@ def info_command(
         help="Unlock the vault to read authenticated metadata.",
         hide_input=True,
     ),
+    passphrase_env: str | None = typer.Option(
+        None,
+        "--passphrase-env",
+        help="Environment variable containing the vault passphrase.",
+    ),
+    passphrase_file: Path | None = typer.Option(
+        None,
+        "--passphrase-file",
+        help="Path to a UTF-8 text file containing the vault passphrase.",
+    ),
+    prompt_passphrase: bool = typer.Option(
+        False,
+        "--prompt-passphrase",
+        help="Prompt for the vault passphrase and show authenticated metadata.",
+    ),
 ) -> None:
     """Show vault metadata."""
     state = ctx.obj if isinstance(ctx.obj, AppState) else AppState()
-    if passphrase is None:
+    resolved_passphrase = resolve_passphrase(
+        direct=passphrase,
+        env_name=passphrase_env,
+        file_path=passphrase_file,
+        prompt_text="Vault passphrase",
+        allow_prompt=prompt_passphrase,
+    )
+    if resolved_passphrase is None:
         locked_info = VaultService.read_locked_info(vault_path)
         emit(
             {
@@ -37,7 +60,7 @@ def info_command(
         )
         return
 
-    unlocked_info = VaultService.read_unlocked_info(vault_path, passphrase=passphrase)
+    unlocked_info = VaultService.read_unlocked_info(vault_path, passphrase=resolved_passphrase)
     emit(
         {
             "vault": str(unlocked_info.path),
