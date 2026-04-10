@@ -27,7 +27,7 @@ packages = [{ include = "vaultcli" }]
 [tool.poetry.dependencies]
 python = "^3.11"
 argon2-cffi = "^25.1.0"
-cryptography = "^44.0.0"
+cryptography = "^46.0.7"
 msgpack = "^1.1.2"
 rich = "^14.1.0"
 typer = "^0.17.4"
