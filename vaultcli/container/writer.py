@@ -6,6 +6,7 @@ import os
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import BinaryIO, Final
 
 from vaultcli.container.format import (
     DEK_NONCE_BYTES,
@@ -34,23 +35,13 @@ class ContainerWriteRequest:
 class ContainerWriter:
     """Write vault container bytes to disk safely."""
 
+    _WRITE_CHUNK_BYTES: Final[int] = 1024 * 1024
+
     @staticmethod
     def serialize_container(request: ContainerWriteRequest) -> bytes:
         """Serialize a validated container request into on-disk bytes."""
         _validate_write_request(request)
-
-        index_size = pack_index_size(len(request.encrypted_index))
-        body = b"".join(
-            [
-                pack_public_header(request.header),
-                request.outer_salt,
-                request.wrapped_dek.nonce,
-                request.wrapped_dek.ciphertext,
-                index_size,
-                request.encrypted_index,
-                request.encrypted_data,
-            ]
-        )
+        body = b"".join(ContainerWriter.iter_serialized_segments(request))
 
         if len(body) != request.header.container_size:
             raise ContainerFormatError(
@@ -64,7 +55,7 @@ class ContainerWriter:
         """Atomically write a container file by serializing to a temp file then replacing."""
         target = Path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
-        payload = cls.serialize_container(request)
+        _validate_write_request(request)
 
         fd, temp_path_str = tempfile.mkstemp(
             prefix=f".{target.name}.",
@@ -75,7 +66,13 @@ class ContainerWriter:
 
         try:
             with os.fdopen(fd, "wb") as handle:
-                handle.write(payload)
+                bytes_written = 0
+                for segment in cls.iter_serialized_segments(request):
+                    bytes_written += cls._write_segment(handle, segment)
+                if bytes_written != request.header.container_size:
+                    raise ContainerFormatError(
+                        "Public header container_size does not match streamed write length."
+                    )
                 handle.flush()
                 os.fsync(handle.fileno())
 
@@ -86,6 +83,30 @@ class ContainerWriter:
             raise
 
         return target
+
+    @staticmethod
+    def iter_serialized_segments(request: ContainerWriteRequest) -> tuple[bytes, ...]:
+        """Yield the container layout as contiguous binary segments."""
+        return (
+            pack_public_header(request.header),
+            request.outer_salt,
+            request.wrapped_dek.nonce,
+            request.wrapped_dek.ciphertext,
+            pack_index_size(len(request.encrypted_index)),
+            request.encrypted_index,
+            request.encrypted_data,
+        )
+
+    @classmethod
+    def _write_segment(cls, handle: BinaryIO, segment: bytes) -> int:
+        total = 0
+        for start in range(0, len(segment), cls._WRITE_CHUNK_BYTES):
+            chunk = segment[start : start + cls._WRITE_CHUNK_BYTES]
+            if not chunk:
+                continue
+            handle.write(chunk)
+            total += len(chunk)
+        return total
 
 
 def _validate_write_request(request: ContainerWriteRequest) -> None:
