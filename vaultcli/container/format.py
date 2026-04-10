@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import struct
+from dataclasses import dataclass
 from typing import cast
 
 from vaultcli.crypto.kdf import KdfProfileName
 from vaultcli.errors import ContainerFormatError
-
 
 MAGIC = b"VAULTCLI"
 FORMAT_VERSION = 1

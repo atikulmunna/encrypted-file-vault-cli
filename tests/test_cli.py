@@ -8,7 +8,6 @@ from typer.testing import CliRunner
 from vaultcli import __version__
 from vaultcli.cli.main import app
 
-
 runner = CliRunner()
 
 

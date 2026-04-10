@@ -8,7 +8,7 @@ The project is being built in public with a strong emphasis on auditable cryptog
 
 VaultCLI is currently in the early implementation stage.
 
-The repository is being set up issue by issue, starting from project scaffolding and moving toward the core cryptographic engine, container format, CLI workflows, integrity verification, and hidden-volume support.
+The repository is being built issue by issue with implementation, tests, and CI tightened together. The current public slice includes core cryptographic services, the container reader/writer, the main CLI workflows, authenticated verification, rekeying, wipe support, and hidden-volume management commands.
 
 Track progress here:
 - Issues: https://github.com/atikulmunna/encrypted-file-vault-cli/issues
@@ -22,6 +22,33 @@ Track progress here:
 - Support streaming-friendly large-file handling
 - Offer secure passphrase input paths for interactive and scripted use
 - Explore hidden-volume support for plausible deniability
+
+## Current Commands
+
+- `vault create`
+- `vault info`
+- `vault list`
+- `vault add`
+- `vault extract`
+- `vault verify`
+- `vault rekey`
+- `vault wipe`
+- `vault hidden create`
+- `vault hidden list`
+- `vault hidden add`
+- `vault hidden extract`
+
+## Development Setup
+
+```powershell
+python -m poetry install
+python -m poetry run ruff check .
+python -m poetry run mypy vaultcli
+python -m poetry run pytest --cov=vaultcli --cov-report=term-missing
+python -m poetry build
+```
+
+The SRS and private working notes are intentionally kept out of git. Public development work is tracked through issues, source, tests, CI, and release notes.
 
 ## Design Principles
 
@@ -57,4 +84,4 @@ Private design drafts and working specification notes may be maintained locally 
 
 ## License
 
-License to be added during the initial project setup.
+This project is licensed under the MIT License. See [LICENSE](LICENSE).

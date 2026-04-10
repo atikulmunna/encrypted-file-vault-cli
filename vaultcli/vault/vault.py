@@ -2,17 +2,24 @@
 
 from __future__ import annotations
 
+import secrets
+import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
-import secrets
-import time
-from typing import Final, Sequence
+from typing import Final
 
 from vaultcli.container.format import PublicHeader, pack_public_header
-from vaultcli.container.index import ChunkRecord, FileRecord, VolumeIndex, deserialize_index, serialize_index
+from vaultcli.container.index import (
+    ChunkRecord,
+    FileRecord,
+    VolumeIndex,
+    deserialize_index,
+    serialize_index,
+)
 from vaultcli.container.reader import ContainerReader, ContainerRecord
-from vaultcli.container.writer import ContainerWriteRequest, ContainerWriter
+from vaultcli.container.writer import ContainerWriter, ContainerWriteRequest
 from vaultcli.crypto.aes_gcm import AES256_KEY_BYTES, EncryptedPayload, EncryptionService
 from vaultcli.crypto.kdf import KdfProfileName, KdfService
 from vaultcli.errors import (
@@ -28,7 +35,6 @@ from vaultcli.vault.hidden import (
     serialize_hidden_region,
     unlock_hidden_region,
 )
-
 
 INDEX_AAD: Final[bytes] = b"vaultcli:outer-index"
 DEFAULT_CHUNK_SIZE: Final[int] = 1024 * 1024
@@ -276,7 +282,11 @@ class VaultService:
         sources: Sequence[str | Path],
     ) -> list[AddedVaultFile]:
         """Encrypt and add files or directories to the hidden volume."""
-        unlocked = cls._unlock_hidden(Path(vault_path), outer_passphrase=outer_passphrase, inner_passphrase=inner_passphrase)
+        unlocked = cls._unlock_hidden(
+            Path(vault_path),
+            outer_passphrase=outer_passphrase,
+            inner_passphrase=inner_passphrase,
+        )
         encrypted_data = bytearray(unlocked.hidden.encrypted_data)
         files_by_path = {file.path: file for file in unlocked.hidden.index.files}
         added_files: list[AddedVaultFile] = []
@@ -388,7 +398,11 @@ class VaultService:
 
         extracted: list[ExtractedVaultFile] = []
         for file_record in selected:
-            plaintext = cls._decrypt_file(file_record, unlocked.hidden.encrypted_data, unlocked.hidden.dek)
+            plaintext = cls._decrypt_file(
+                file_record,
+                unlocked.hidden.encrypted_data,
+                unlocked.hidden.dek,
+            )
             destination = target_dir / Path(file_record.path)
             destination.parent.mkdir(parents=True, exist_ok=True)
             if destination.exists() and not overwrite:
@@ -556,7 +570,9 @@ class VaultService:
                 INDEX_AAD,
             )
         except CryptoAuthenticationError as exc:
-            raise CryptoAuthenticationError("Vault unlock failed: wrong passphrase or corrupted index.") from exc
+            raise CryptoAuthenticationError(
+                "Vault unlock failed: wrong passphrase or corrupted index."
+            ) from exc
 
         return deserialize_index(plaintext)
 
@@ -733,7 +749,11 @@ class VaultService:
         )
 
     @classmethod
-    def _resolve_hidden_boundary(cls, index: VolumeIndex, outer_encrypted_data_len: int) -> VolumeIndex:
+    def _resolve_hidden_boundary(
+        cls,
+        index: VolumeIndex,
+        outer_encrypted_data_len: int,
+    ) -> VolumeIndex:
         if index.reserved_tail_start is None:
             return index
 
@@ -775,4 +795,4 @@ def _iter_source_files(source: Path) -> list[tuple[str, Path]]:
 
 
 def _chunk_aad(internal_path: str, chunk_index: int, is_final: bool) -> bytes:
-    return f"{internal_path}|chunk={chunk_index}|final={int(is_final)}".encode("utf-8")
+    return f"{internal_path}|chunk={chunk_index}|final={int(is_final)}".encode()

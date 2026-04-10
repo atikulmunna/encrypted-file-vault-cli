@@ -9,7 +9,6 @@ import msgpack
 
 from vaultcli.errors import ContainerFormatError
 
-
 INDEX_VERSION = 1
 
 

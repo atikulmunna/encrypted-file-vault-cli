@@ -6,7 +6,7 @@ import pytest
 
 from vaultcli.container.format import PublicHeader
 from vaultcli.container.reader import ContainerReader
-from vaultcli.container.writer import ContainerWriteRequest, ContainerWriter
+from vaultcli.container.writer import ContainerWriter, ContainerWriteRequest
 from vaultcli.crypto.aes_gcm import EncryptedPayload
 from vaultcli.crypto.kdf import KdfProfileName
 from vaultcli.errors import ContainerFormatError

@@ -7,12 +7,9 @@ from pathlib import Path
 
 from vaultcli.container.format import (
     INDEX_DATA_OFFSET,
-    INDEX_SIZE_BYTES,
     INDEX_SIZE_OFFSET,
     OUTER_DEK_NONCE_OFFSET,
-    OUTER_SALT_BYTES,
     OUTER_SALT_OFFSET,
-    WRAPPED_DEK_BYTES,
     WRAPPED_DEK_OFFSET,
     PublicHeader,
     parse_index_size,

@@ -2,7 +2,7 @@
 
 import pytest
 
-from vaultcli.crypto.aes_gcm import AES256_KEY_BYTES, EncryptionService, EncryptedPayload
+from vaultcli.crypto.aes_gcm import AES256_KEY_BYTES, EncryptedPayload, EncryptionService
 from vaultcli.errors import CryptoAuthenticationError, CryptoInputError
 
 

@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import secrets
+from dataclasses import dataclass
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from vaultcli.errors import CryptoAuthenticationError, CryptoInputError
-
 
 AES256_KEY_BYTES = 32
 GCM_NONCE_BYTES = 12

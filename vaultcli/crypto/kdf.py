@@ -9,7 +9,6 @@ from argon2.low_level import Type, hash_secret_raw
 
 from vaultcli.errors import KdfInputError, KdfProfileError
 
-
 KDF_SALT_BYTES = 32
 KDF_KEY_BYTES = 32
 

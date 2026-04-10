@@ -29,7 +29,11 @@ def extract_command(
         "--output",
         help="Output directory for extracted files.",
     ),
-    extract_all: bool = typer.Option(False, "--all", help="Extract all files from the active volume."),
+    extract_all: bool = typer.Option(
+        False,
+        "--all",
+        help="Extract all files from the active volume.",
+    ),
     overwrite: bool = typer.Option(False, "--overwrite", help="Overwrite existing files."),
 ) -> None:
     """Extract files from a vault."""

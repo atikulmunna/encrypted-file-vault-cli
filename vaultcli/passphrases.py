@@ -7,7 +7,6 @@ import string
 
 from vaultcli.errors import WeakPassphraseError
 
-
 MINIMUM_PASSPHRASE_BITS = 60.0
 
 
@@ -39,6 +38,8 @@ def enforce_passphrase_policy(passphrase: str, *, allow_weak: bool = False) -> f
     entropy_bits = estimate_passphrase_entropy_bits(passphrase)
     if entropy_bits < MINIMUM_PASSPHRASE_BITS and not allow_weak:
         raise WeakPassphraseError(
-            f"Passphrase estimated at {entropy_bits:.1f} bits; minimum is {MINIMUM_PASSPHRASE_BITS:.0f} bits."
+            "Passphrase estimated at "
+            f"{entropy_bits:.1f} bits; "
+            f"minimum is {MINIMUM_PASSPHRASE_BITS:.0f} bits."
         )
     return entropy_bits

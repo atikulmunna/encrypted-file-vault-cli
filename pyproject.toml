@@ -3,7 +3,25 @@ name = "vaultcli"
 version = "0.1.0"
 description = "Security-focused CLI for encrypted file vaults."
 authors = ["Atikul Munna <atikul.munna@northsouth.edu>"]
+license = "MIT"
 readme = "README.md"
+homepage = "https://github.com/atikulmunna/encrypted-file-vault-cli"
+repository = "https://github.com/atikulmunna/encrypted-file-vault-cli"
+documentation = "https://github.com/atikulmunna/encrypted-file-vault-cli#readme"
+keywords = ["encryption", "cli", "vault", "security", "argon2", "aes-gcm"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security :: Cryptography",
+    "Topic :: Utilities",
+]
 packages = [{ include = "vaultcli" }]
 
 [tool.poetry.dependencies]
@@ -30,6 +48,14 @@ addopts = "-q"
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[tool.coverage.run]
+branch = true
+source = ["vaultcli"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]

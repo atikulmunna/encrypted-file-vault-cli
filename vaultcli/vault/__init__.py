@@ -6,8 +6,8 @@ from vaultcli.vault.vault import (
     ListedVaultFile,
     LockedVaultInfo,
     UnlockedVaultInfo,
-    VerificationResult,
     VaultService,
+    VerificationResult,
 )
 
 __all__ = [

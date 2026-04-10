@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import os
-from pathlib import Path
 import tempfile
+from dataclasses import dataclass
+from pathlib import Path
 
 from vaultcli.container.format import (
     DEK_NONCE_BYTES,
@@ -94,7 +94,9 @@ def _validate_write_request(request: ContainerWriteRequest) -> None:
     if len(request.wrapped_dek.nonce) != DEK_NONCE_BYTES:
         raise ContainerFormatError(f"Wrapped DEK nonce must be exactly {DEK_NONCE_BYTES} bytes.")
     if len(request.wrapped_dek.ciphertext) != WRAPPED_DEK_BYTES:
-        raise ContainerFormatError(f"Wrapped DEK ciphertext must be exactly {WRAPPED_DEK_BYTES} bytes.")
+        raise ContainerFormatError(
+            f"Wrapped DEK ciphertext must be exactly {WRAPPED_DEK_BYTES} bytes."
+        )
     if not request.encrypted_index:
         raise ContainerFormatError("Encrypted index must not be empty.")
     if request.header.container_size < INDEX_DATA_OFFSET + len(request.encrypted_index):

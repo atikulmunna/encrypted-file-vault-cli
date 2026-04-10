@@ -11,7 +11,6 @@ from vaultcli.cli import output
 from vaultcli.cli.commands import add, create, extract, hidden, info, list_cmd, rekey, verify, wipe
 from vaultcli.cli.state import AppState
 
-
 app = typer.Typer(
     help="Security-focused CLI for encrypted file vaults.",
     no_args_is_help=True,

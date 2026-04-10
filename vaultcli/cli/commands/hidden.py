@@ -10,7 +10,6 @@ from vaultcli.cli.output import emit
 from vaultcli.cli.state import AppState
 from vaultcli.vault import VaultService
 
-
 app = typer.Typer(help="Manage hidden-volume operations.", add_completion=False)
 
 
@@ -18,7 +17,11 @@ app = typer.Typer(help="Manage hidden-volume operations.", add_completion=False)
 def hidden_create_command(
     ctx: typer.Context,
     vault_path: Path = typer.Argument(..., help="Path to the target vault container."),
-    hidden_size: int = typer.Option(..., "--hidden-size", help="Size of the hidden tail region in bytes."),
+    hidden_size: int = typer.Option(
+        ...,
+        "--hidden-size",
+        help="Size of the hidden tail region in bytes.",
+    ),
     outer_passphrase: str = typer.Option(
         ...,
         "--outer-passphrase",
@@ -162,7 +165,11 @@ def hidden_extract_command(
         "--output",
         help="Output directory for extracted files.",
     ),
-    extract_all: bool = typer.Option(False, "--all", help="Extract all files from the hidden volume."),
+    extract_all: bool = typer.Option(
+        False,
+        "--all",
+        help="Extract all files from the hidden volume.",
+    ),
     overwrite: bool = typer.Option(False, "--overwrite", help="Overwrite existing files."),
 ) -> None:
     """Extract files from the hidden volume."""

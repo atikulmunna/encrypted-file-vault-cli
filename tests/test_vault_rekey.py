@@ -25,7 +25,10 @@ def test_rekey_changes_passphrase_without_rewriting_encrypted_data(tmp_path: Pat
     after = vault_path.read_bytes()
 
     assert before != after
-    assert VaultService.list_files(vault_path, passphrase="NewPassphrase123!")[0].path == "secret.txt"
+    assert (
+        VaultService.list_files(vault_path, passphrase="NewPassphrase123!")[0].path
+        == "secret.txt"
+    )
     with pytest.raises(CryptoAuthenticationError):
         VaultService.list_files(vault_path, passphrase="OldPassphrase123!")
 

@@ -4,7 +4,13 @@ import secrets
 
 import pytest
 
-from vaultcli.crypto.kdf import KDF_PROFILES, KDF_KEY_BYTES, KDF_SALT_BYTES, KdfProfileName, KdfService
+from vaultcli.crypto.kdf import (
+    KDF_KEY_BYTES,
+    KDF_PROFILES,
+    KDF_SALT_BYTES,
+    KdfProfileName,
+    KdfService,
+)
 from vaultcli.errors import KdfInputError, KdfProfileError
 
 

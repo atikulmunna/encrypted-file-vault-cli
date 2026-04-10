@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import secrets
+from dataclasses import dataclass
 from typing import Final
 
 from vaultcli.container.index import VolumeIndex, deserialize_index, serialize_index
 from vaultcli.crypto.aes_gcm import EncryptedPayload, EncryptionService
 from vaultcli.crypto.kdf import KdfProfileName, KdfService
 from vaultcli.errors import ContainerFormatError, CryptoAuthenticationError, HiddenVolumeError
-
 
 HIDDEN_INDEX_AAD: Final[bytes] = b"vaultcli:hidden-index"
 HIDDEN_HEADER_AAD: Final[bytes] = b"vaultcli:hidden-header"
