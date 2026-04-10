@@ -7,6 +7,7 @@ from pathlib import Path
 import typer
 
 from vaultcli.cli.output import emit
+from vaultcli.cli.passphrases import require_named_passphrase
 from vaultcli.cli.state import AppState
 from vaultcli.vault import VaultService
 
@@ -22,17 +23,37 @@ def hidden_create_command(
         "--hidden-size",
         help="Size of the hidden tail region in bytes.",
     ),
-    outer_passphrase: str = typer.Option(
-        ...,
+    outer_passphrase: str | None = typer.Option(
+        None,
         "--outer-passphrase",
         help="Current outer-volume passphrase.",
         hide_input=True,
     ),
-    inner_passphrase: str = typer.Option(
-        ...,
+    outer_passphrase_env: str | None = typer.Option(
+        None,
+        "--outer-passphrase-env",
+        help="Environment variable containing the outer-volume passphrase.",
+    ),
+    outer_passphrase_file: Path | None = typer.Option(
+        None,
+        "--outer-passphrase-file",
+        help="Path to a UTF-8 text file containing the outer-volume passphrase.",
+    ),
+    inner_passphrase: str | None = typer.Option(
+        None,
         "--inner-passphrase",
         help="Passphrase for the hidden volume.",
         hide_input=True,
+    ),
+    inner_passphrase_env: str | None = typer.Option(
+        None,
+        "--inner-passphrase-env",
+        help="Environment variable containing the hidden-volume passphrase.",
+    ),
+    inner_passphrase_file: Path | None = typer.Option(
+        None,
+        "--inner-passphrase-file",
+        help="Path to a UTF-8 text file containing the hidden-volume passphrase.",
     ),
     allow_weak_passphrase: bool = typer.Option(
         False,
@@ -42,10 +63,25 @@ def hidden_create_command(
 ) -> None:
     """Create a hidden volume."""
     state = ctx.obj if isinstance(ctx.obj, AppState) else AppState()
+    resolved_outer_passphrase = require_named_passphrase(
+        option_name="outer-passphrase",
+        direct=outer_passphrase,
+        env_name=outer_passphrase_env,
+        file_path=outer_passphrase_file,
+        prompt_text="Outer vault passphrase",
+    )
+    resolved_inner_passphrase = require_named_passphrase(
+        option_name="inner-passphrase",
+        direct=inner_passphrase,
+        env_name=inner_passphrase_env,
+        file_path=inner_passphrase_file,
+        prompt_text="Hidden volume passphrase",
+        confirm=True,
+    )
     created_path = VaultService.create_hidden_volume(
         vault_path,
-        outer_passphrase=outer_passphrase,
-        inner_passphrase=inner_passphrase,
+        outer_passphrase=resolved_outer_passphrase,
+        inner_passphrase=resolved_inner_passphrase,
         hidden_size=hidden_size,
         allow_weak_passphrase=allow_weak_passphrase,
     )
@@ -64,25 +100,59 @@ def hidden_create_command(
 def hidden_list_command(
     ctx: typer.Context,
     vault_path: Path = typer.Argument(..., help="Path to the target vault container."),
-    outer_passphrase: str = typer.Option(
-        ...,
+    outer_passphrase: str | None = typer.Option(
+        None,
         "--outer-passphrase",
         help="Current outer-volume passphrase.",
         hide_input=True,
     ),
-    inner_passphrase: str = typer.Option(
-        ...,
+    outer_passphrase_env: str | None = typer.Option(
+        None,
+        "--outer-passphrase-env",
+        help="Environment variable containing the outer-volume passphrase.",
+    ),
+    outer_passphrase_file: Path | None = typer.Option(
+        None,
+        "--outer-passphrase-file",
+        help="Path to a UTF-8 text file containing the outer-volume passphrase.",
+    ),
+    inner_passphrase: str | None = typer.Option(
+        None,
         "--inner-passphrase",
         help="Passphrase for the hidden volume.",
         hide_input=True,
     ),
+    inner_passphrase_env: str | None = typer.Option(
+        None,
+        "--inner-passphrase-env",
+        help="Environment variable containing the hidden-volume passphrase.",
+    ),
+    inner_passphrase_file: Path | None = typer.Option(
+        None,
+        "--inner-passphrase-file",
+        help="Path to a UTF-8 text file containing the hidden-volume passphrase.",
+    ),
 ) -> None:
     """List authenticated contents of the hidden volume."""
     state = ctx.obj if isinstance(ctx.obj, AppState) else AppState()
+    resolved_outer_passphrase = require_named_passphrase(
+        option_name="outer-passphrase",
+        direct=outer_passphrase,
+        env_name=outer_passphrase_env,
+        file_path=outer_passphrase_file,
+        prompt_text="Outer vault passphrase",
+    )
+    resolved_inner_passphrase = require_named_passphrase(
+        option_name="inner-passphrase",
+        direct=inner_passphrase,
+        env_name=inner_passphrase_env,
+        file_path=inner_passphrase_file,
+        prompt_text="Hidden volume passphrase",
+    )
     files = VaultService.list_hidden_files(
         vault_path,
-        outer_passphrase=outer_passphrase,
-        inner_passphrase=inner_passphrase,
+        outer_passphrase=resolved_outer_passphrase,
+        inner_passphrase=resolved_inner_passphrase,
     )
     emit(
         {
@@ -106,25 +176,59 @@ def hidden_add_command(
     ctx: typer.Context,
     vault_path: Path = typer.Argument(..., help="Path to the target vault container."),
     sources: list[Path] = typer.Argument(..., help="Source files or directories to add."),
-    outer_passphrase: str = typer.Option(
-        ...,
+    outer_passphrase: str | None = typer.Option(
+        None,
         "--outer-passphrase",
         help="Current outer-volume passphrase.",
         hide_input=True,
     ),
-    inner_passphrase: str = typer.Option(
-        ...,
+    outer_passphrase_env: str | None = typer.Option(
+        None,
+        "--outer-passphrase-env",
+        help="Environment variable containing the outer-volume passphrase.",
+    ),
+    outer_passphrase_file: Path | None = typer.Option(
+        None,
+        "--outer-passphrase-file",
+        help="Path to a UTF-8 text file containing the outer-volume passphrase.",
+    ),
+    inner_passphrase: str | None = typer.Option(
+        None,
         "--inner-passphrase",
         help="Passphrase for the hidden volume.",
         hide_input=True,
     ),
+    inner_passphrase_env: str | None = typer.Option(
+        None,
+        "--inner-passphrase-env",
+        help="Environment variable containing the hidden-volume passphrase.",
+    ),
+    inner_passphrase_file: Path | None = typer.Option(
+        None,
+        "--inner-passphrase-file",
+        help="Path to a UTF-8 text file containing the hidden-volume passphrase.",
+    ),
 ) -> None:
     """Add files or directories to the hidden volume."""
     state = ctx.obj if isinstance(ctx.obj, AppState) else AppState()
+    resolved_outer_passphrase = require_named_passphrase(
+        option_name="outer-passphrase",
+        direct=outer_passphrase,
+        env_name=outer_passphrase_env,
+        file_path=outer_passphrase_file,
+        prompt_text="Outer vault passphrase",
+    )
+    resolved_inner_passphrase = require_named_passphrase(
+        option_name="inner-passphrase",
+        direct=inner_passphrase,
+        env_name=inner_passphrase_env,
+        file_path=inner_passphrase_file,
+        prompt_text="Hidden volume passphrase",
+    )
     added_files = VaultService.add_hidden_paths(
         vault_path,
-        outer_passphrase=outer_passphrase,
-        inner_passphrase=inner_passphrase,
+        outer_passphrase=resolved_outer_passphrase,
+        inner_passphrase=resolved_inner_passphrase,
         sources=sources,
     )
     emit(
@@ -148,17 +252,37 @@ def hidden_extract_command(
         None,
         help="Internal hidden-volume path to extract. Omit when using --all.",
     ),
-    outer_passphrase: str = typer.Option(
-        ...,
+    outer_passphrase: str | None = typer.Option(
+        None,
         "--outer-passphrase",
         help="Current outer-volume passphrase.",
         hide_input=True,
     ),
-    inner_passphrase: str = typer.Option(
-        ...,
+    outer_passphrase_env: str | None = typer.Option(
+        None,
+        "--outer-passphrase-env",
+        help="Environment variable containing the outer-volume passphrase.",
+    ),
+    outer_passphrase_file: Path | None = typer.Option(
+        None,
+        "--outer-passphrase-file",
+        help="Path to a UTF-8 text file containing the outer-volume passphrase.",
+    ),
+    inner_passphrase: str | None = typer.Option(
+        None,
         "--inner-passphrase",
         help="Passphrase for the hidden volume.",
         hide_input=True,
+    ),
+    inner_passphrase_env: str | None = typer.Option(
+        None,
+        "--inner-passphrase-env",
+        help="Environment variable containing the hidden-volume passphrase.",
+    ),
+    inner_passphrase_file: Path | None = typer.Option(
+        None,
+        "--inner-passphrase-file",
+        help="Path to a UTF-8 text file containing the hidden-volume passphrase.",
     ),
     output_dir: Path = typer.Option(
         Path("."),
@@ -174,10 +298,24 @@ def hidden_extract_command(
 ) -> None:
     """Extract files from the hidden volume."""
     state = ctx.obj if isinstance(ctx.obj, AppState) else AppState()
+    resolved_outer_passphrase = require_named_passphrase(
+        option_name="outer-passphrase",
+        direct=outer_passphrase,
+        env_name=outer_passphrase_env,
+        file_path=outer_passphrase_file,
+        prompt_text="Outer vault passphrase",
+    )
+    resolved_inner_passphrase = require_named_passphrase(
+        option_name="inner-passphrase",
+        direct=inner_passphrase,
+        env_name=inner_passphrase_env,
+        file_path=inner_passphrase_file,
+        prompt_text="Hidden volume passphrase",
+    )
     extracted_files = VaultService.extract_hidden_files(
         vault_path,
-        outer_passphrase=outer_passphrase,
-        inner_passphrase=inner_passphrase,
+        outer_passphrase=resolved_outer_passphrase,
+        inner_passphrase=resolved_inner_passphrase,
         output_dir=output_dir,
         internal_path=internal_path,
         extract_all=extract_all,

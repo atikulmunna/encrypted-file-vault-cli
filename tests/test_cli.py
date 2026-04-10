@@ -41,6 +41,38 @@ def test_create_command_creates_vault_file(tmp_path: Path) -> None:
     assert vault_path.exists()
 
 
+def test_create_command_supports_passphrase_env(tmp_path: Path, monkeypatch) -> None:
+    vault_path = tmp_path / "env-create.vault"
+    monkeypatch.setenv("VAULTCLI_CREATE_PASSPHRASE", "EnvPassphrase123!")
+
+    result = runner.invoke(
+        app,
+        [
+            "--json",
+            "create",
+            str(vault_path),
+            "--passphrase-env",
+            "VAULTCLI_CREATE_PASSPHRASE",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert vault_path.exists()
+
+
+def test_create_command_supports_prompted_passphrase(tmp_path: Path) -> None:
+    vault_path = tmp_path / "prompt-create.vault"
+
+    result = runner.invoke(
+        app,
+        ["--json", "create", str(vault_path)],
+        input="PromptPassphrase123!\nPromptPassphrase123!\n",
+    )
+
+    assert result.exit_code == 0
+    assert vault_path.exists()
+
+
 def test_hidden_subcommand_is_registered() -> None:
     result = runner.invoke(app, ["hidden", "create", "--help"])
 
@@ -148,6 +180,54 @@ def test_add_and_extract_commands_round_trip_file(tmp_path: Path) -> None:
     extract_payload = json.loads(extract_result.stdout)
     assert extract_payload["extracted"][0]["path"] == "note.txt"
     assert (output_dir / "note.txt").read_text(encoding="utf-8") == "vault round trip"
+
+
+def test_add_and_extract_support_passphrase_file(tmp_path: Path) -> None:
+    vault_path = tmp_path / "file-passphrase.vault"
+    source_file = tmp_path / "note.txt"
+    source_file.write_text("file passphrase", encoding="utf-8")
+    passphrase_file = tmp_path / "passphrase.txt"
+    passphrase_file.write_text("FilePassphrase123!\n", encoding="utf-8")
+    output_dir = tmp_path / "extract"
+
+    assert runner.invoke(
+        app,
+        [
+            "create",
+            str(vault_path),
+            "--passphrase-file",
+            str(passphrase_file),
+        ],
+    ).exit_code == 0
+
+    add_result = runner.invoke(
+        app,
+        [
+            "--json",
+            "add",
+            str(vault_path),
+            str(source_file),
+            "--passphrase-file",
+            str(passphrase_file),
+        ],
+    )
+    assert add_result.exit_code == 0
+
+    extract_result = runner.invoke(
+        app,
+        [
+            "--json",
+            "extract",
+            str(vault_path),
+            "note.txt",
+            "--passphrase-file",
+            str(passphrase_file),
+            "--output",
+            str(output_dir),
+        ],
+    )
+    assert extract_result.exit_code == 0
+    assert (output_dir / "note.txt").read_text(encoding="utf-8") == "file passphrase"
 
 
 def test_extract_all_command_recovers_directory_tree(tmp_path: Path) -> None:
@@ -310,6 +390,45 @@ def test_rekey_command_supports_weak_override(tmp_path: Path) -> None:
     assert rekey_result.exit_code == 0
     payload = json.loads(rekey_result.stdout)
     assert payload["status"] == "rekeyed"
+
+
+def test_rekey_command_supports_env_and_file_sources(tmp_path: Path, monkeypatch) -> None:
+    vault_path = tmp_path / "rekey-sources.vault"
+    new_passphrase_file = tmp_path / "new-passphrase.txt"
+    new_passphrase_file.write_text("NewPassphrase123!\n", encoding="utf-8")
+    monkeypatch.setenv("VAULTCLI_CURRENT_PASSPHRASE", "OldPassphrase123!")
+
+    assert runner.invoke(
+        app,
+        [
+            "create",
+            str(vault_path),
+            "--passphrase",
+            "OldPassphrase123!",
+        ],
+    ).exit_code == 0
+
+    rekey_result = runner.invoke(
+        app,
+        [
+            "--json",
+            "rekey",
+            str(vault_path),
+            "--current-passphrase-env",
+            "VAULTCLI_CURRENT_PASSPHRASE",
+            "--new-passphrase-file",
+            str(new_passphrase_file),
+        ],
+    )
+
+    assert rekey_result.exit_code == 0
+    assert (
+        runner.invoke(
+            app,
+            ["--json", "list", str(vault_path), "--passphrase-file", str(new_passphrase_file)],
+        ).exit_code
+        == 0
+    )
 
 
 def test_wipe_command_removes_file(tmp_path: Path) -> None:
@@ -513,3 +632,68 @@ def test_hidden_add_does_not_change_outer_cli_listing(tmp_path: Path) -> None:
     assert hidden_list_result.exit_code == 0
     assert json.loads(outer_list_result.stdout)["files"][0]["path"] == "outer.txt"
     assert json.loads(hidden_list_result.stdout)["files"][0]["path"] == "hidden.txt"
+
+
+def test_hidden_commands_support_env_and_file_passphrases(tmp_path: Path, monkeypatch) -> None:
+    vault_path = tmp_path / "hidden-sources.vault"
+    hidden_source = tmp_path / "hidden.txt"
+    hidden_source.write_text("hidden source", encoding="utf-8")
+    inner_passphrase_file = tmp_path / "inner-passphrase.txt"
+    inner_passphrase_file.write_text("InnerPassphrase123!\n", encoding="utf-8")
+    monkeypatch.setenv("VAULTCLI_OUTER_PASSPHRASE", "OuterPassphrase123!")
+
+    assert runner.invoke(
+        app,
+        [
+            "create",
+            str(vault_path),
+            "--passphrase-env",
+            "VAULTCLI_OUTER_PASSPHRASE",
+        ],
+    ).exit_code == 0
+    assert runner.invoke(
+        app,
+        [
+            "hidden",
+            "create",
+            str(vault_path),
+            "--hidden-size",
+            "2048",
+            "--outer-passphrase-env",
+            "VAULTCLI_OUTER_PASSPHRASE",
+            "--inner-passphrase-file",
+            str(inner_passphrase_file),
+        ],
+    ).exit_code == 0
+
+    add_result = runner.invoke(
+        app,
+        [
+            "--json",
+            "hidden",
+            "add",
+            str(vault_path),
+            str(hidden_source),
+            "--outer-passphrase-env",
+            "VAULTCLI_OUTER_PASSPHRASE",
+            "--inner-passphrase-file",
+            str(inner_passphrase_file),
+        ],
+    )
+    assert add_result.exit_code == 0
+
+    list_result = runner.invoke(
+        app,
+        [
+            "--json",
+            "hidden",
+            "list",
+            str(vault_path),
+            "--outer-passphrase-env",
+            "VAULTCLI_OUTER_PASSPHRASE",
+            "--inner-passphrase-file",
+            str(inner_passphrase_file),
+        ],
+    )
+    assert list_result.exit_code == 0
+    assert json.loads(list_result.stdout)["files"][0]["path"] == "hidden.txt"

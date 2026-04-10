@@ -7,6 +7,7 @@ from pathlib import Path
 import typer
 
 from vaultcli.cli.output import emit
+from vaultcli.cli.passphrases import require_passphrase
 from vaultcli.cli.state import AppState
 from vaultcli.vault import VaultService
 
@@ -18,11 +19,21 @@ def extract_command(
         None,
         help="Internal vault path to extract. Omit when using --all.",
     ),
-    passphrase: str = typer.Option(
-        ...,
+    passphrase: str | None = typer.Option(
+        None,
         "--passphrase",
         help="Unlock the vault to extract files.",
         hide_input=True,
+    ),
+    passphrase_env: str | None = typer.Option(
+        None,
+        "--passphrase-env",
+        help="Environment variable containing the vault passphrase.",
+    ),
+    passphrase_file: Path | None = typer.Option(
+        None,
+        "--passphrase-file",
+        help="Path to a UTF-8 text file containing the vault passphrase.",
     ),
     output_dir: Path = typer.Option(
         Path("."),
@@ -38,9 +49,15 @@ def extract_command(
 ) -> None:
     """Extract files from a vault."""
     state = ctx.obj if isinstance(ctx.obj, AppState) else AppState()
+    resolved_passphrase = require_passphrase(
+        direct=passphrase,
+        env_name=passphrase_env,
+        file_path=passphrase_file,
+        prompt_text="Vault passphrase",
+    )
     extracted_files = VaultService.extract_files(
         vault_path,
-        passphrase=passphrase,
+        passphrase=resolved_passphrase,
         output_dir=output_dir,
         internal_path=internal_path,
         extract_all=extract_all,
