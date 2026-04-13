@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import secrets
 import time
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
@@ -444,7 +444,7 @@ class VaultService:
         checked_chunks = 0
 
         for file_record in unlocked.index.files:
-            cls._decrypt_file(file_record, unlocked.outer_encrypted_data, unlocked.dek)
+            cls._verify_file(file_record, unlocked.outer_encrypted_data, unlocked.dek)
             checked_chunks += len(file_record.chunks)
 
         return VerificationResult(
@@ -730,26 +730,8 @@ class VaultService:
     @classmethod
     def _decrypt_file(cls, file_record: FileRecord, encrypted_data: bytes, dek: bytes) -> bytes:
         plaintext_parts: list[bytes] = []
-        for chunk_index, chunk in enumerate(file_record.chunks):
-            start = chunk.offset
-            end = start + chunk.ciphertext_size
-            ciphertext = encrypted_data[start:end]
-            if len(ciphertext) != chunk.ciphertext_size:
-                raise ContainerFormatError(
-                    f"Encrypted chunk for {file_record.path} is truncated at chunk {chunk_index}."
-                )
-
-            plaintext_parts.append(
-                EncryptionService.decrypt_chunk(
-                    dek,
-                    EncryptedPayload(nonce=chunk.nonce, ciphertext=ciphertext),
-                    _chunk_aad(
-                        file_record.path,
-                        chunk_index,
-                        chunk_index == len(file_record.chunks) - 1,
-                    ),
-                )
-            )
+        for plaintext_chunk in cls._iter_decrypted_chunks(file_record, encrypted_data, dek):
+            plaintext_parts.append(plaintext_chunk)
 
         plaintext = b"".join(plaintext_parts)
         if sha256(plaintext).hexdigest() != file_record.sha256:
@@ -767,25 +749,7 @@ class VaultService:
         digest = sha256()
         try:
             with destination.open("wb") as handle:
-                for chunk_index, chunk in enumerate(file_record.chunks):
-                    start = chunk.offset
-                    end = start + chunk.ciphertext_size
-                    ciphertext = encrypted_data[start:end]
-                    if len(ciphertext) != chunk.ciphertext_size:
-                        raise ContainerFormatError(
-                            f"Encrypted chunk for {file_record.path} is truncated at chunk "
-                            f"{chunk_index}."
-                        )
-
-                    plaintext_chunk = EncryptionService.decrypt_chunk(
-                        dek,
-                        EncryptedPayload(nonce=chunk.nonce, ciphertext=ciphertext),
-                        _chunk_aad(
-                            file_record.path,
-                            chunk_index,
-                            chunk_index == len(file_record.chunks) - 1,
-                        ),
-                    )
+                for plaintext_chunk in cls._iter_decrypted_chunks(file_record, encrypted_data, dek):
                     digest.update(plaintext_chunk)
                     handle.write(plaintext_chunk)
         except Exception:
@@ -797,6 +761,40 @@ class VaultService:
             if destination.exists():
                 destination.unlink()
             raise ContainerFormatError(f"SHA-256 mismatch while extracting {file_record.path}.")
+
+    @classmethod
+    def _verify_file(cls, file_record: FileRecord, encrypted_data: bytes, dek: bytes) -> None:
+        digest = sha256()
+        for plaintext_chunk in cls._iter_decrypted_chunks(file_record, encrypted_data, dek):
+            digest.update(plaintext_chunk)
+        if digest.hexdigest() != file_record.sha256:
+            raise ContainerFormatError(f"SHA-256 mismatch while verifying {file_record.path}.")
+
+    @classmethod
+    def _iter_decrypted_chunks(
+        cls,
+        file_record: FileRecord,
+        encrypted_data: bytes,
+        dek: bytes,
+    ) -> Iterator[bytes]:
+        for chunk_index, chunk in enumerate(file_record.chunks):
+            start = chunk.offset
+            end = start + chunk.ciphertext_size
+            ciphertext = encrypted_data[start:end]
+            if len(ciphertext) != chunk.ciphertext_size:
+                raise ContainerFormatError(
+                    f"Encrypted chunk for {file_record.path} is truncated at chunk {chunk_index}."
+                )
+
+            yield EncryptionService.decrypt_chunk(
+                dek,
+                EncryptedPayload(nonce=chunk.nonce, ciphertext=ciphertext),
+                _chunk_aad(
+                    file_record.path,
+                    chunk_index,
+                    chunk_index == len(file_record.chunks) - 1,
+                ),
+            )
 
     @staticmethod
     def _get_file_record(index: VolumeIndex, internal_path: str) -> FileRecord:
