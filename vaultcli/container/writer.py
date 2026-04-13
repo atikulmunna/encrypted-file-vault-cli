@@ -30,6 +30,7 @@ class ContainerWriteRequest:
     wrapped_dek: EncryptedPayload
     encrypted_index: bytes
     encrypted_data: bytes = b""
+    encrypted_data_segments: tuple[bytes, ...] = ()
 
 
 class ContainerWriter:
@@ -87,6 +88,11 @@ class ContainerWriter:
     @staticmethod
     def iter_serialized_segments(request: ContainerWriteRequest) -> tuple[bytes, ...]:
         """Yield the container layout as contiguous binary segments."""
+        encrypted_data_segments = (
+            request.encrypted_data_segments
+            if request.encrypted_data_segments
+            else (request.encrypted_data,)
+        )
         return (
             pack_public_header(request.header),
             request.outer_salt,
@@ -94,7 +100,7 @@ class ContainerWriter:
             request.wrapped_dek.ciphertext,
             pack_index_size(len(request.encrypted_index)),
             request.encrypted_index,
-            request.encrypted_data,
+            *encrypted_data_segments,
         )
 
     @classmethod
@@ -110,6 +116,10 @@ class ContainerWriter:
 
 
 def _validate_write_request(request: ContainerWriteRequest) -> None:
+    if request.encrypted_data and request.encrypted_data_segments:
+        raise ContainerFormatError(
+            "Use either encrypted_data or encrypted_data_segments, not both."
+        )
     if len(request.outer_salt) != OUTER_SALT_BYTES:
         raise ContainerFormatError(f"Outer salt must be exactly {OUTER_SALT_BYTES} bytes.")
     if len(request.wrapped_dek.nonce) != DEK_NONCE_BYTES:
@@ -120,5 +130,15 @@ def _validate_write_request(request: ContainerWriteRequest) -> None:
         )
     if not request.encrypted_index:
         raise ContainerFormatError("Encrypted index must not be empty.")
+    encrypted_data_length = (
+        sum(len(segment) for segment in request.encrypted_data_segments)
+        if request.encrypted_data_segments
+        else len(request.encrypted_data)
+    )
     if request.header.container_size < INDEX_DATA_OFFSET + len(request.encrypted_index):
         raise ContainerFormatError("Container size is too small for the required metadata layout.")
+    expected_size = INDEX_DATA_OFFSET + len(request.encrypted_index) + encrypted_data_length
+    if request.header.container_size != expected_size:
+        raise ContainerFormatError(
+            "Public header container_size does not match the provided encrypted payload lengths."
+        )

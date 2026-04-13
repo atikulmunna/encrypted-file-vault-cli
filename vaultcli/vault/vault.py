@@ -599,8 +599,11 @@ class VaultService:
     ) -> Path:
         resolved_index = cls._resolve_hidden_boundary(index, len(outer_encrypted_data))
         encrypted_index = cls._encrypt_index(resolved_index, unlocked.dek)
-        combined_data = outer_encrypted_data + hidden_region
-        container_size = 32 + 32 + 12 + 48 + 4 + len(encrypted_index) + len(combined_data)
+        encrypted_data_segments = tuple(
+            segment for segment in (outer_encrypted_data, hidden_region) if segment
+        )
+        encrypted_data_length = sum(len(segment) for segment in encrypted_data_segments)
+        container_size = 32 + 32 + 12 + 48 + 4 + len(encrypted_index) + encrypted_data_length
         new_header = PublicHeader(
             version=unlocked.record.header.version,
             flags=unlocked.record.header.flags,
@@ -618,7 +621,7 @@ class VaultService:
             outer_salt=unlocked.record.outer_salt,
             wrapped_dek=wrapped_dek,
             encrypted_index=encrypted_index,
-            encrypted_data=combined_data,
+            encrypted_data_segments=encrypted_data_segments,
         )
         return ContainerWriter.write_atomic(unlocked.path, request)
 

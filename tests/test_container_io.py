@@ -54,6 +54,33 @@ def test_container_iter_serialized_segments_matches_byte_serialization() -> None
     assert streamed_payload == payload
 
 
+def test_container_supports_split_encrypted_data_segments() -> None:
+    encrypted_index = b"encrypted-index"
+    encrypted_parts = (b"outer-data", b"hidden-tail")
+    request = ContainerWriteRequest(
+        header=PublicHeader(
+            kdf_profile=KdfProfileName.INTERACTIVE,
+            container_size=32
+            + 32
+            + 12
+            + 48
+            + 4
+            + len(encrypted_index)
+            + sum(len(part) for part in encrypted_parts),
+        ),
+        outer_salt=b"s" * 32,
+        wrapped_dek=EncryptedPayload(nonce=b"n" * 12, ciphertext=b"c" * 48),
+        encrypted_index=encrypted_index,
+        encrypted_data_segments=encrypted_parts,
+    )
+
+    payload = ContainerWriter.serialize_container(request)
+    record = ContainerReader.read_bytes(payload)
+
+    assert record.encrypted_index == encrypted_index
+    assert record.encrypted_data == b"".join(encrypted_parts)
+
+
 def test_container_read_rejects_header_size_mismatch() -> None:
     request = _sample_request()
     payload = bytearray(ContainerWriter.serialize_container(request))
@@ -84,6 +111,20 @@ def test_container_writer_rejects_mismatched_container_size() -> None:
 
     with pytest.raises(ContainerFormatError):
         ContainerWriter.serialize_container(broken)
+
+
+def test_container_writer_rejects_dual_encrypted_data_inputs() -> None:
+    request = ContainerWriteRequest(
+        header=PublicHeader(container_size=32 + 32 + 12 + 48 + 4 + 1 + 1),
+        outer_salt=b"s" * 32,
+        wrapped_dek=EncryptedPayload(nonce=b"n" * 12, ciphertext=b"c" * 48),
+        encrypted_index=b"i",
+        encrypted_data=b"a",
+        encrypted_data_segments=(b"b",),
+    )
+
+    with pytest.raises(ContainerFormatError):
+        ContainerWriter.serialize_container(request)
 
 
 def test_container_write_atomic_replaces_existing_file(tmp_path: Path) -> None:
