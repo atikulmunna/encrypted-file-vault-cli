@@ -74,3 +74,26 @@ def test_vault_service_streams_multi_chunk_file_round_trip(tmp_path: Path) -> No
     assert len(file_record.chunks) > 1
     assert file_record.chunk_size == DEFAULT_CHUNK_SIZE
     assert sha256(extracted[0].output_path.read_bytes()).hexdigest() == sha256(expected).hexdigest()
+
+
+def test_vault_service_appends_new_outer_file_after_existing_encrypted_data(tmp_path: Path) -> None:
+    vault_path = tmp_path / "append.vault"
+    first_file = tmp_path / "first.txt"
+    second_file = tmp_path / "second.txt"
+    first_file.write_text("alpha", encoding="utf-8")
+    second_file.write_text("beta", encoding="utf-8")
+
+    VaultService.create_empty_vault(vault_path, passphrase="append-passphrase")
+    VaultService.add_paths(vault_path, passphrase="append-passphrase", sources=[first_file])
+    before = VaultService._unlock(vault_path, passphrase="append-passphrase")
+    first_record = before.index.files[0]
+    prior_outer_length = len(before.outer_encrypted_data)
+
+    VaultService.add_paths(vault_path, passphrase="append-passphrase", sources=[second_file])
+    after = VaultService._unlock(vault_path, passphrase="append-passphrase")
+
+    first_after = next(item for item in after.index.files if item.path == "first.txt")
+    second_after = next(item for item in after.index.files if item.path == "second.txt")
+
+    assert first_after.chunks == first_record.chunks
+    assert second_after.chunks[0].offset >= prior_outer_length

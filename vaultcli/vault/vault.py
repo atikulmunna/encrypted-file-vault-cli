@@ -253,8 +253,9 @@ class VaultService:
         sources: Sequence[str | Path],
     ) -> list[AddedVaultFile]:
         """Encrypt and add one or more source files/directories to the outer volume."""
-        unlocked = cls._unlock(Path(vault_path), passphrase=passphrase)
-        encrypted_data = bytearray(unlocked.outer_encrypted_data)
+        unlocked = cls._unlock_metadata(Path(vault_path), passphrase=passphrase)
+        outer_encrypted_length = cls._existing_outer_encrypted_length(unlocked)
+        encrypted_data = bytearray()
         files_by_path = {file.path: file for file in unlocked.index.files}
         added_files: list[AddedVaultFile] = []
         now = int(time.time())
@@ -266,6 +267,7 @@ class VaultService:
                     source_path=source_path,
                     dek=unlocked.dek,
                     encrypted_data=encrypted_data,
+                    base_offset=outer_encrypted_length,
                     added_at=now,
                 )
                 files_by_path[internal_path] = file_record
@@ -279,12 +281,16 @@ class VaultService:
             reserved_tail_start=unlocked.index.reserved_tail_start,
             files=tuple(sorted(files_by_path.values(), key=lambda item: item.path)),
         )
-        cls._write_updated_vault(
+        cls._write_updated_vault_from_segments(
             unlocked,
             passphrase=passphrase,
             index=new_index,
-            outer_encrypted_data=bytes(encrypted_data),
-            hidden_region=unlocked.hidden_region,
+            encrypted_data_segments=(
+                *cls._existing_encrypted_file_segments(unlocked, include_hidden=False),
+                bytes(encrypted_data),
+                *cls._existing_hidden_file_segments(unlocked),
+            ),
+            outer_encrypted_length=outer_encrypted_length + len(encrypted_data),
         )
         return added_files
 
@@ -770,6 +776,26 @@ class VaultService:
             )
         return tuple(segments)
 
+    @classmethod
+    def _existing_hidden_file_segments(
+        cls,
+        unlocked: UnlockedVaultMetadata,
+    ) -> tuple[EncryptedDataFileSegment, ...]:
+        if unlocked.index.reserved_tail_start is None:
+            return ()
+
+        outer_length = cls._existing_outer_encrypted_length(unlocked)
+        hidden_length = unlocked.record.encrypted_data_size - outer_length
+        if hidden_length <= 0:
+            return ()
+        return (
+            EncryptedDataFileSegment(
+                path=unlocked.path,
+                offset=unlocked.index.reserved_tail_start,
+                length=hidden_length,
+            ),
+        )
+
     @staticmethod
     def _existing_outer_encrypted_length(unlocked: UnlockedVaultMetadata) -> int:
         if unlocked.index.reserved_tail_start is None:
@@ -793,6 +819,7 @@ class VaultService:
         source_path: Path,
         dek: bytes,
         encrypted_data: bytearray,
+        base_offset: int = 0,
         added_at: int,
         chunk_size: int = DEFAULT_CHUNK_SIZE,
     ) -> FileRecord:
@@ -811,7 +838,7 @@ class VaultService:
                     b"",
                     _chunk_aad(internal_path, 0, True),
                 )
-                offset = len(encrypted_data)
+                offset = base_offset + len(encrypted_data)
                 encrypted_data.extend(payload.ciphertext)
                 chunks.append(
                     ChunkRecord(
@@ -833,7 +860,7 @@ class VaultService:
                         current_chunk,
                         _chunk_aad(internal_path, chunk_index, is_final),
                     )
-                    offset = len(encrypted_data)
+                    offset = base_offset + len(encrypted_data)
                     encrypted_data.extend(payload.ciphertext)
                     chunks.append(
                         ChunkRecord(
