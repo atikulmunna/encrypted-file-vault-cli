@@ -108,6 +108,32 @@ class VerificationResult:
 
 
 @dataclass(frozen=True, slots=True)
+class InMemoryCiphertextSource:
+    """Ciphertext backed by in-memory bytes."""
+
+    data: bytes
+
+    def read(self, offset: int, length: int) -> bytes:
+        return self.data[offset : offset + length]
+
+
+@dataclass(frozen=True, slots=True)
+class FileCiphertextSource:
+    """Ciphertext backed by a region inside a container file."""
+
+    path: Path
+    base_offset: int
+
+    def read(self, offset: int, length: int) -> bytes:
+        with self.path.open("rb") as handle:
+            handle.seek(self.base_offset + offset)
+            return handle.read(length)
+
+
+CiphertextSource = InMemoryCiphertextSource | FileCiphertextSource
+
+
+@dataclass(frozen=True, slots=True)
 class UnlockedVault:
     """Unlocked outer-volume material needed for authenticated operations."""
 
@@ -376,7 +402,8 @@ class VaultService:
         if not extract_all and internal_path is None:
             raise ContainerFormatError("Specify an internal path or use --all.")
 
-        unlocked = cls._unlock(Path(vault_path), passphrase=passphrase)
+        unlocked = cls._unlock_metadata(Path(vault_path), passphrase=passphrase)
+        ciphertext_source = cls._outer_ciphertext_source(unlocked)
         target_dir = Path(output_dir)
         target_dir.mkdir(parents=True, exist_ok=True)
 
@@ -395,7 +422,7 @@ class VaultService:
                 )
             cls._decrypt_file_to_path(
                 file_record,
-                unlocked.outer_encrypted_data,
+                ciphertext_source,
                 unlocked.dek,
                 destination,
             )
@@ -425,11 +452,12 @@ class VaultService:
         if not extract_all and internal_path is None:
             raise ContainerFormatError("Specify an internal path or use --all.")
 
-        unlocked = cls._unlock_hidden(
+        unlocked = cls._unlock_hidden_metadata(
             Path(vault_path),
             outer_passphrase=outer_passphrase,
             inner_passphrase=inner_passphrase,
         )
+        ciphertext_source = cls._hidden_ciphertext_source(unlocked)
         target_dir = Path(output_dir)
         target_dir.mkdir(parents=True, exist_ok=True)
 
@@ -448,7 +476,7 @@ class VaultService:
                 )
             cls._decrypt_file_to_path(
                 file_record,
-                unlocked.hidden.encrypted_data,
+                ciphertext_source,
                 unlocked.hidden.dek,
                 destination,
             )
@@ -480,11 +508,12 @@ class VaultService:
     @classmethod
     def verify_unlocked(cls, path: str | Path, *, passphrase: str) -> VerificationResult:
         """Perform authenticated verification of the active outer volume."""
-        unlocked = cls._unlock(Path(path), passphrase=passphrase)
+        unlocked = cls._unlock_metadata(Path(path), passphrase=passphrase)
+        ciphertext_source = cls._outer_ciphertext_source(unlocked)
         checked_chunks = 0
 
         for file_record in unlocked.index.files:
-            cls._verify_file(file_record, unlocked.outer_encrypted_data, unlocked.dek)
+            cls._verify_file(file_record, ciphertext_source, unlocked.dek)
             checked_chunks += len(file_record.chunks)
 
         return VerificationResult(
@@ -510,7 +539,7 @@ class VaultService:
     @classmethod
     def read_unlocked_info(cls, path: str | Path, *, passphrase: str) -> UnlockedVaultInfo:
         """Read authenticated outer-volume metadata with the supplied passphrase."""
-        unlocked = cls._unlock(Path(path), passphrase=passphrase)
+        unlocked = cls._unlock_metadata(Path(path), passphrase=passphrase)
         return UnlockedVaultInfo(
             path=unlocked.path,
             active_volume="outer",
@@ -518,13 +547,13 @@ class VaultService:
             kdf_profile=unlocked.record.header.kdf_profile,
             created_at=unlocked.index.created_at,
             file_count=len(unlocked.index.files),
-            encrypted_size=len(unlocked.outer_encrypted_data),
+            encrypted_size=cls._existing_outer_encrypted_length(unlocked),
         )
 
     @classmethod
     def list_files(cls, path: str | Path, *, passphrase: str) -> list[ListedVaultFile]:
         """List authenticated file metadata for the outer volume."""
-        unlocked = cls._unlock(Path(path), passphrase=passphrase)
+        unlocked = cls._unlock_metadata(Path(path), passphrase=passphrase)
         return [
             ListedVaultFile(
                 path=file.path,
@@ -543,7 +572,7 @@ class VaultService:
         inner_passphrase: str,
     ) -> list[ListedVaultFile]:
         """List authenticated file metadata for the hidden volume."""
-        unlocked = cls._unlock_hidden(
+        unlocked = cls._unlock_hidden_metadata(
             Path(path),
             outer_passphrase=outer_passphrase,
             inner_passphrase=inner_passphrase,
@@ -996,7 +1025,11 @@ class VaultService:
     @classmethod
     def _decrypt_file(cls, file_record: FileRecord, encrypted_data: bytes, dek: bytes) -> bytes:
         plaintext_parts: list[bytes] = []
-        for plaintext_chunk in cls._iter_decrypted_chunks(file_record, encrypted_data, dek):
+        for plaintext_chunk in cls._iter_decrypted_chunks(
+            file_record,
+            InMemoryCiphertextSource(encrypted_data),
+            dek,
+        ):
             plaintext_parts.append(plaintext_chunk)
 
         plaintext = b"".join(plaintext_parts)
@@ -1008,14 +1041,18 @@ class VaultService:
     def _decrypt_file_to_path(
         cls,
         file_record: FileRecord,
-        encrypted_data: bytes,
+        ciphertext_source: CiphertextSource,
         dek: bytes,
         destination: Path,
     ) -> None:
         digest = sha256()
         try:
             with destination.open("wb") as handle:
-                for plaintext_chunk in cls._iter_decrypted_chunks(file_record, encrypted_data, dek):
+                for plaintext_chunk in cls._iter_decrypted_chunks(
+                    file_record,
+                    ciphertext_source,
+                    dek,
+                ):
                     digest.update(plaintext_chunk)
                     handle.write(plaintext_chunk)
         except Exception:
@@ -1029,9 +1066,14 @@ class VaultService:
             raise ContainerFormatError(f"SHA-256 mismatch while extracting {file_record.path}.")
 
     @classmethod
-    def _verify_file(cls, file_record: FileRecord, encrypted_data: bytes, dek: bytes) -> None:
+    def _verify_file(
+        cls,
+        file_record: FileRecord,
+        ciphertext_source: CiphertextSource,
+        dek: bytes,
+    ) -> None:
         digest = sha256()
-        for plaintext_chunk in cls._iter_decrypted_chunks(file_record, encrypted_data, dek):
+        for plaintext_chunk in cls._iter_decrypted_chunks(file_record, ciphertext_source, dek):
             digest.update(plaintext_chunk)
         if digest.hexdigest() != file_record.sha256:
             raise ContainerFormatError(f"SHA-256 mismatch while verifying {file_record.path}.")
@@ -1040,13 +1082,11 @@ class VaultService:
     def _iter_decrypted_chunks(
         cls,
         file_record: FileRecord,
-        encrypted_data: bytes,
+        ciphertext_source: CiphertextSource,
         dek: bytes,
     ) -> Iterator[bytes]:
         for chunk_index, chunk in enumerate(file_record.chunks):
-            start = chunk.offset
-            end = start + chunk.ciphertext_size
-            ciphertext = encrypted_data[start:end]
+            ciphertext = ciphertext_source.read(chunk.offset, chunk.ciphertext_size)
             if len(ciphertext) != chunk.ciphertext_size:
                 raise ContainerFormatError(
                     f"Encrypted chunk for {file_record.path} is truncated at chunk {chunk_index}."
@@ -1061,6 +1101,34 @@ class VaultService:
                     chunk_index == len(file_record.chunks) - 1,
                 ),
             )
+
+    @staticmethod
+    def _outer_ciphertext_source(
+        unlocked: UnlockedVaultMetadata | UnlockedVault,
+    ) -> CiphertextSource:
+        if isinstance(unlocked, UnlockedVault):
+            return InMemoryCiphertextSource(unlocked.outer_encrypted_data)
+        return FileCiphertextSource(
+            path=unlocked.path,
+            base_offset=unlocked.record.encrypted_data_offset,
+        )
+
+    @classmethod
+    def _hidden_ciphertext_source(
+        cls,
+        unlocked: UnlockedHiddenVaultMetadata | UnlockedHiddenVault,
+    ) -> CiphertextSource:
+        if isinstance(unlocked, UnlockedHiddenVault):
+            return InMemoryCiphertextSource(unlocked.hidden.encrypted_data)
+
+        hidden_region_start = unlocked.outer.index.reserved_tail_start
+        if hidden_region_start is None:
+            raise HiddenVolumeError("No hidden volume is configured for this vault.")
+
+        return FileCiphertextSource(
+            path=unlocked.outer.path,
+            base_offset=hidden_region_start + unlocked.hidden.record.encrypted_data_offset,
+        )
 
     @staticmethod
     def _get_file_record(index: VolumeIndex, internal_path: str) -> FileRecord:

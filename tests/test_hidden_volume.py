@@ -212,3 +212,52 @@ def test_hidden_operations_require_configured_hidden_volume(tmp_path: Path) -> N
             inner_passphrase="InnerPassphrase123!",
             sources=[source_file],
         )
+
+
+def test_hidden_authenticated_reads_do_not_require_full_unlock(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault_path = tmp_path / "hidden-metadata-only.vault"
+    hidden_source = tmp_path / "inner.txt"
+    hidden_source.write_text("metadata hidden unlock path", encoding="utf-8")
+
+    VaultService.create_empty_vault(vault_path, passphrase="OuterPassphrase123!")
+    VaultService.create_hidden_volume(
+        vault_path,
+        outer_passphrase="OuterPassphrase123!",
+        inner_passphrase="InnerPassphrase123!",
+        hidden_size=2048,
+    )
+    VaultService.add_hidden_paths(
+        vault_path,
+        outer_passphrase="OuterPassphrase123!",
+        inner_passphrase="InnerPassphrase123!",
+        sources=[hidden_source],
+    )
+
+    monkeypatch.setattr(
+        VaultService,
+        "_unlock_hidden",
+        classmethod(
+            lambda cls, path, *, outer_passphrase, inner_passphrase: (
+                _ for _ in ()
+            ).throw(AssertionError("_unlock_hidden should not be used"))
+        ),
+    )
+
+    listed = VaultService.list_hidden_files(
+        vault_path,
+        outer_passphrase="OuterPassphrase123!",
+        inner_passphrase="InnerPassphrase123!",
+    )
+    extracted = VaultService.extract_hidden_files(
+        vault_path,
+        outer_passphrase="OuterPassphrase123!",
+        inner_passphrase="InnerPassphrase123!",
+        output_dir=tmp_path / "out",
+        internal_path="inner.txt",
+    )
+
+    assert [item.path for item in listed] == ["inner.txt"]
+    assert extracted[0].output_path.read_text(encoding="utf-8") == "metadata hidden unlock path"
