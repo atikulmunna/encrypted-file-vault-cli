@@ -18,8 +18,12 @@ from vaultcli.container.index import (
     deserialize_index,
     serialize_index,
 )
-from vaultcli.container.reader import ContainerReader, ContainerRecord
-from vaultcli.container.writer import ContainerWriter, ContainerWriteRequest
+from vaultcli.container.reader import ContainerMetadataRecord, ContainerReader, ContainerRecord
+from vaultcli.container.writer import (
+    ContainerWriter,
+    ContainerWriteRequest,
+    EncryptedDataFileSegment,
+)
 from vaultcli.crypto.aes_gcm import AES256_KEY_BYTES, EncryptedPayload, EncryptionService
 from vaultcli.crypto.kdf import KdfProfileName, KdfService
 from vaultcli.errors import (
@@ -120,6 +124,16 @@ class UnlockedHiddenVault:
     hidden: UnlockedHiddenRegion
 
 
+@dataclass(frozen=True, slots=True)
+class UnlockedVaultMetadata:
+    """Unlocked vault metadata without loading encrypted data bytes."""
+
+    path: Path
+    record: ContainerMetadataRecord
+    dek: bytes
+    index: VolumeIndex
+
+
 class VaultService:
     """Current outer-volume service used by the first real CLI commands."""
 
@@ -183,13 +197,13 @@ class VaultService:
     ) -> Path:
         """Re-wrap the existing DEK with a KEK derived from a new passphrase."""
         enforce_passphrase_policy(new_passphrase, allow_weak=allow_weak_passphrase)
-        unlocked = cls._unlock(Path(vault_path), passphrase=current_passphrase)
-        return cls._write_updated_vault(
+        unlocked = cls._unlock_metadata(Path(vault_path), passphrase=current_passphrase)
+        return cls._write_updated_vault_from_segments(
             unlocked,
             passphrase=new_passphrase,
             index=unlocked.index,
-            outer_encrypted_data=unlocked.outer_encrypted_data,
-            hidden_region=unlocked.hidden_region,
+            encrypted_data_segments=cls._existing_encrypted_file_segments(unlocked),
+            outer_encrypted_length=cls._existing_outer_encrypted_length(unlocked),
         )
 
     @classmethod
@@ -204,7 +218,7 @@ class VaultService:
     ) -> Path:
         """Append a hidden-volume region and reserve the tail for outer writes."""
         enforce_passphrase_policy(inner_passphrase, allow_weak=allow_weak_passphrase)
-        unlocked = cls._unlock(Path(vault_path), passphrase=outer_passphrase)
+        unlocked = cls._unlock_metadata(Path(vault_path), passphrase=outer_passphrase)
         if unlocked.index.reserved_tail_start is not None:
             raise HiddenVolumeError("Hidden volume already configured for this vault.")
 
@@ -219,12 +233,15 @@ class VaultService:
             reserved_tail_start=0,
             files=unlocked.index.files,
         )
-        return cls._write_updated_vault(
+        return cls._write_updated_vault_from_segments(
             unlocked,
             passphrase=outer_passphrase,
             index=new_index,
-            outer_encrypted_data=unlocked.outer_encrypted_data,
-            hidden_region=hidden_region,
+            encrypted_data_segments=(
+                *cls._existing_encrypted_file_segments(unlocked, include_hidden=False),
+                hidden_region,
+            ),
+            outer_encrypted_length=cls._existing_outer_encrypted_length(unlocked),
         )
 
     @classmethod
@@ -533,6 +550,13 @@ class VaultService:
         )
 
     @classmethod
+    def _unlock_metadata(cls, path: Path, *, passphrase: str) -> UnlockedVaultMetadata:
+        record = ContainerReader.read_path_metadata(path)
+        dek = cls._unwrap_dek(record, passphrase=passphrase)
+        index = cls._decrypt_index(record, dek=dek)
+        return UnlockedVaultMetadata(path=path, record=record, dek=dek, index=index)
+
+    @classmethod
     def _unlock_hidden(
         cls,
         path: Path,
@@ -552,13 +576,23 @@ class VaultService:
         return UnlockedHiddenVault(outer=outer, hidden=hidden)
 
     @classmethod
-    def _unwrap_dek(cls, record: ContainerRecord, *, passphrase: str) -> bytes:
+    def _unwrap_dek(
+        cls,
+        record: ContainerRecord | ContainerMetadataRecord,
+        *,
+        passphrase: str,
+    ) -> bytes:
         kek = KdfService.derive_key(passphrase, record.outer_salt, record.header.kdf_profile)
         header_bytes = pack_public_header(record.header)
         return EncryptionService.unwrap_dek(kek, record.wrapped_dek, header_bytes)
 
     @classmethod
-    def _decrypt_index(cls, record: ContainerRecord, *, dek: bytes) -> VolumeIndex:
+    def _decrypt_index(
+        cls,
+        record: ContainerRecord | ContainerMetadataRecord,
+        *,
+        dek: bytes,
+    ) -> VolumeIndex:
         if len(record.encrypted_index) <= 12:
             raise ContainerFormatError("Encrypted index payload is too small to contain a nonce.")
 
@@ -586,6 +620,42 @@ class VaultService:
         plaintext = serialize_index(index)
         payload = EncryptionService.encrypt_chunk(dek, plaintext, INDEX_AAD)
         return payload.nonce + payload.ciphertext
+
+    @classmethod
+    def _write_updated_vault_from_segments(
+        cls,
+        unlocked: UnlockedVaultMetadata,
+        *,
+        passphrase: str,
+        index: VolumeIndex,
+        encrypted_data_segments: Sequence[bytes | EncryptedDataFileSegment],
+        outer_encrypted_length: int,
+    ) -> Path:
+        resolved_index = cls._resolve_hidden_boundary(index, outer_encrypted_length)
+        encrypted_index = cls._encrypt_index(resolved_index, unlocked.dek)
+        encrypted_data_length = cls._encrypted_data_segment_length(encrypted_data_segments)
+        container_size = 32 + 32 + 12 + 48 + 4 + len(encrypted_index) + encrypted_data_length
+        new_header = PublicHeader(
+            version=unlocked.record.header.version,
+            flags=unlocked.record.header.flags,
+            kdf_profile=unlocked.record.header.kdf_profile,
+            container_size=container_size,
+        )
+        kek = KdfService.derive_key(passphrase, unlocked.record.outer_salt, new_header.kdf_profile)
+        wrapped_dek = EncryptionService.wrap_dek(
+            kek,
+            unlocked.dek,
+            pack_public_header(new_header),
+        )
+
+        request = ContainerWriteRequest(
+            header=new_header,
+            outer_salt=unlocked.record.outer_salt,
+            wrapped_dek=wrapped_dek,
+            encrypted_index=encrypted_index,
+            encrypted_data_segments=tuple(encrypted_data_segments),
+        )
+        return ContainerWriter.write_atomic(unlocked.path, request)
 
     @classmethod
     def _write_updated_vault(
@@ -650,6 +720,69 @@ class VaultService:
             index=unlocked.outer.index,
             outer_encrypted_data=unlocked.outer.outer_encrypted_data,
             hidden_region=hidden_region,
+        )
+
+    @classmethod
+    def _existing_encrypted_file_segments(
+        cls,
+        unlocked: UnlockedVaultMetadata,
+        *,
+        include_hidden: bool = True,
+    ) -> tuple[EncryptedDataFileSegment, ...]:
+        encrypted_data_offset = unlocked.record.encrypted_data_offset
+        encrypted_data_size = unlocked.record.encrypted_data_size
+
+        if unlocked.index.reserved_tail_start is None:
+            if not include_hidden or encrypted_data_size == 0:
+                return () if encrypted_data_size == 0 else (
+                    EncryptedDataFileSegment(
+                        path=unlocked.path,
+                        offset=encrypted_data_offset,
+                        length=encrypted_data_size,
+                    ),
+                )
+            return (
+                EncryptedDataFileSegment(
+                    path=unlocked.path,
+                    offset=encrypted_data_offset,
+                    length=encrypted_data_size,
+                ),
+            )
+
+        outer_length = unlocked.index.reserved_tail_start - encrypted_data_offset
+        hidden_length = encrypted_data_size - outer_length
+        segments: list[EncryptedDataFileSegment] = []
+        if outer_length > 0:
+            segments.append(
+                EncryptedDataFileSegment(
+                    path=unlocked.path,
+                    offset=encrypted_data_offset,
+                    length=outer_length,
+                )
+            )
+        if include_hidden and hidden_length > 0:
+            segments.append(
+                EncryptedDataFileSegment(
+                    path=unlocked.path,
+                    offset=unlocked.index.reserved_tail_start,
+                    length=hidden_length,
+                )
+            )
+        return tuple(segments)
+
+    @staticmethod
+    def _existing_outer_encrypted_length(unlocked: UnlockedVaultMetadata) -> int:
+        if unlocked.index.reserved_tail_start is None:
+            return unlocked.record.encrypted_data_size
+        return unlocked.index.reserved_tail_start - unlocked.record.encrypted_data_offset
+
+    @staticmethod
+    def _encrypted_data_segment_length(
+        segments: Sequence[bytes | EncryptedDataFileSegment],
+    ) -> int:
+        return sum(
+            len(segment) if isinstance(segment, bytes) else segment.length
+            for segment in segments
         )
 
     @classmethod

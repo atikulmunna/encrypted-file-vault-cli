@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO, Final
@@ -30,7 +31,16 @@ class ContainerWriteRequest:
     wrapped_dek: EncryptedPayload
     encrypted_index: bytes
     encrypted_data: bytes = b""
-    encrypted_data_segments: tuple[bytes, ...] = ()
+    encrypted_data_segments: tuple[bytes | EncryptedDataFileSegment, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class EncryptedDataFileSegment:
+    """A slice of encrypted data copied directly from an existing container file."""
+
+    path: Path
+    offset: int
+    length: int
 
 
 class ContainerWriter:
@@ -42,6 +52,13 @@ class ContainerWriter:
     def serialize_container(request: ContainerWriteRequest) -> bytes:
         """Serialize a validated container request into on-disk bytes."""
         _validate_write_request(request)
+        if any(
+            isinstance(segment, EncryptedDataFileSegment)
+            for segment in request.encrypted_data_segments
+        ):
+            raise ContainerFormatError(
+                "serialize_container does not support file-backed encrypted data segments."
+            )
         body = b"".join(ContainerWriter.iter_serialized_segments(request))
 
         if len(body) != request.header.container_size:
@@ -68,8 +85,11 @@ class ContainerWriter:
         try:
             with os.fdopen(fd, "wb") as handle:
                 bytes_written = 0
-                for segment in cls.iter_serialized_segments(request):
-                    bytes_written += cls._write_segment(handle, segment)
+                for segment in cls._iter_write_segments(request):
+                    if isinstance(segment, bytes):
+                        bytes_written += cls._write_segment(handle, segment)
+                    else:
+                        bytes_written += cls._write_file_segment(handle, segment)
                 if bytes_written != request.header.container_size:
                     raise ContainerFormatError(
                         "Public header container_size does not match streamed write length."
@@ -86,6 +106,26 @@ class ContainerWriter:
         return target
 
     @staticmethod
+    def _iter_write_segments(
+        request: ContainerWriteRequest,
+    ) -> Sequence[bytes | EncryptedDataFileSegment]:
+        if request.encrypted_data_segments:
+            encrypted_data_segments = request.encrypted_data_segments
+        else:
+            encrypted_data_segments = (request.encrypted_data,)
+
+        segments: list[bytes | EncryptedDataFileSegment] = [
+            pack_public_header(request.header),
+            request.outer_salt,
+            request.wrapped_dek.nonce,
+            request.wrapped_dek.ciphertext,
+            pack_index_size(len(request.encrypted_index)),
+            request.encrypted_index,
+        ]
+        segments.extend(encrypted_data_segments)
+        return segments
+
+    @staticmethod
     def iter_serialized_segments(request: ContainerWriteRequest) -> tuple[bytes, ...]:
         """Yield the container layout as contiguous binary segments."""
         encrypted_data_segments = (
@@ -93,15 +133,21 @@ class ContainerWriter:
             if request.encrypted_data_segments
             else (request.encrypted_data,)
         )
-        return (
+        segments = [
             pack_public_header(request.header),
             request.outer_salt,
             request.wrapped_dek.nonce,
             request.wrapped_dek.ciphertext,
             pack_index_size(len(request.encrypted_index)),
             request.encrypted_index,
-            *encrypted_data_segments,
-        )
+        ]
+        for segment in encrypted_data_segments:
+            if not isinstance(segment, bytes):
+                raise ContainerFormatError(
+                    "iter_serialized_segments does not support file-backed encrypted data segments."
+                )
+            segments.append(segment)
+        return tuple(segments)
 
     @classmethod
     def _write_segment(cls, handle: BinaryIO, segment: bytes) -> int:
@@ -114,11 +160,36 @@ class ContainerWriter:
             total += len(chunk)
         return total
 
+    @classmethod
+    def _write_file_segment(cls, handle: BinaryIO, segment: EncryptedDataFileSegment) -> int:
+        total = 0
+        with segment.path.open("rb") as source:
+            source.seek(segment.offset)
+            remaining = segment.length
+            while remaining > 0:
+                chunk = source.read(min(cls._WRITE_CHUNK_BYTES, remaining))
+                if len(chunk) == 0:
+                    raise ContainerFormatError(
+                        "File-backed encrypted data segment ended before its declared length."
+                    )
+                handle.write(chunk)
+                total += len(chunk)
+                remaining -= len(chunk)
+        return total
+
 
 def _validate_write_request(request: ContainerWriteRequest) -> None:
-    if request.encrypted_data and request.encrypted_data_segments:
+    encrypted_sources = sum(
+        1
+        for is_used in (
+            bool(request.encrypted_data),
+            bool(request.encrypted_data_segments),
+        )
+        if is_used
+    )
+    if encrypted_sources > 1:
         raise ContainerFormatError(
-            "Use either encrypted_data or encrypted_data_segments, not both."
+            "Use exactly one encrypted data source: bytes, byte segments, or file segments."
         )
     if len(request.outer_salt) != OUTER_SALT_BYTES:
         raise ContainerFormatError(f"Outer salt must be exactly {OUTER_SALT_BYTES} bytes.")
@@ -131,7 +202,10 @@ def _validate_write_request(request: ContainerWriteRequest) -> None:
     if not request.encrypted_index:
         raise ContainerFormatError("Encrypted index must not be empty.")
     encrypted_data_length = (
-        sum(len(segment) for segment in request.encrypted_data_segments)
+        sum(
+            len(segment) if isinstance(segment, bytes) else segment.length
+            for segment in request.encrypted_data_segments
+        )
         if request.encrypted_data_segments
         else len(request.encrypted_data)
     )
