@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import secrets
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Final
 
 from vaultcli.container.index import VolumeIndex, deserialize_index, serialize_index
@@ -29,6 +30,7 @@ class HiddenRegionRecord:
     salt: bytes
     wrapped_dek: EncryptedPayload
     encrypted_index: bytes
+    encrypted_data_offset: int
     encrypted_data_and_padding: bytes
     total_size: int
 
@@ -41,6 +43,27 @@ class UnlockedHiddenRegion:
     dek: bytes
     index: VolumeIndex
     encrypted_data: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class HiddenRegionMetadataRecord:
+    """Parsed hidden-region metadata without loading hidden ciphertext bytes."""
+
+    salt: bytes
+    wrapped_dek: EncryptedPayload
+    encrypted_index: bytes
+    encrypted_data_offset: int
+    encrypted_data_size: int
+    total_size: int
+
+
+@dataclass(frozen=True, slots=True)
+class UnlockedHiddenRegionMetadata:
+    """Authenticated hidden-volume metadata without loading hidden ciphertext bytes."""
+
+    record: HiddenRegionMetadataRecord
+    dek: bytes
+    index: VolumeIndex
 
 
 def build_hidden_region(
@@ -116,9 +139,54 @@ def parse_hidden_region(region: bytes) -> HiddenRegionRecord:
             ciphertext=region[nonce_end:wrapped_end],
         ),
         encrypted_index=region[index_size_end:index_end],
+        encrypted_data_offset=index_end,
         encrypted_data_and_padding=region[index_end:],
         total_size=len(region),
     )
+
+
+def read_hidden_region_metadata(
+    path: str | Path,
+    *,
+    offset: int,
+    size: int,
+) -> HiddenRegionMetadataRecord:
+    """Read hidden-region metadata from a reserved tail without loading hidden ciphertext bytes."""
+    target = Path(path)
+    with target.open("rb") as handle:
+        handle.seek(offset)
+        prefix = handle.read(HIDDEN_REGION_FIXED_BYTES)
+        if len(prefix) != HIDDEN_REGION_FIXED_BYTES:
+            raise HiddenVolumeError("Reserved tail is too small to contain a hidden region.")
+
+        salt_end = HIDDEN_SALT_BYTES
+        nonce_end = salt_end + HIDDEN_NONCE_BYTES
+        wrapped_end = nonce_end + HIDDEN_WRAPPED_DEK_BYTES
+        index_size_end = wrapped_end + HIDDEN_INDEX_SIZE_BYTES
+
+        encrypted_index_size = int.from_bytes(prefix[wrapped_end:index_size_end], "big")
+        if encrypted_index_size <= HIDDEN_NONCE_BYTES:
+            raise HiddenVolumeError("Hidden index payload is too small to contain a nonce.")
+
+        encrypted_index = handle.read(encrypted_index_size)
+        if len(encrypted_index) != encrypted_index_size:
+            raise HiddenVolumeError("Hidden index extends beyond the reserved tail.")
+
+        encrypted_data_offset = HIDDEN_REGION_FIXED_BYTES + encrypted_index_size
+        if encrypted_data_offset > size:
+            raise HiddenVolumeError("Hidden encrypted data starts outside the reserved tail.")
+
+        return HiddenRegionMetadataRecord(
+            salt=prefix[:salt_end],
+            wrapped_dek=EncryptedPayload(
+                nonce=prefix[salt_end:nonce_end],
+                ciphertext=prefix[nonce_end:wrapped_end],
+            ),
+            encrypted_index=encrypted_index,
+            encrypted_data_offset=encrypted_data_offset,
+            encrypted_data_size=size - encrypted_data_offset,
+            total_size=size,
+        )
 
 
 def unlock_hidden_region(
@@ -149,6 +217,33 @@ def unlock_hidden_region(
         index=index,
         encrypted_data=record.encrypted_data_and_padding[:used_bytes],
     )
+
+
+def unlock_hidden_region_metadata(
+    path: str | Path,
+    *,
+    offset: int,
+    size: int,
+    passphrase: str,
+    kdf_profile: KdfProfileName,
+) -> UnlockedHiddenRegionMetadata:
+    """Authenticate hidden-region metadata without loading hidden ciphertext bytes."""
+    record = read_hidden_region_metadata(path, offset=offset, size=size)
+    kek = KdfService.derive_key(passphrase, record.salt, kdf_profile)
+
+    try:
+        dek = EncryptionService.unwrap_dek(kek, record.wrapped_dek, HIDDEN_HEADER_AAD)
+    except CryptoAuthenticationError as exc:
+        raise CryptoAuthenticationError(
+            "Hidden volume unlock failed: wrong passphrase or corrupted hidden header."
+        ) from exc
+
+    index = _decrypt_hidden_index(record.encrypted_index, dek)
+    used_bytes = _used_hidden_data_bytes(index)
+    if used_bytes > record.encrypted_data_size:
+        raise HiddenVolumeError("Hidden file data extends beyond the reserved tail size.")
+
+    return UnlockedHiddenRegionMetadata(record=record, dek=dek, index=index)
 
 
 def serialize_hidden_region(
@@ -184,6 +279,31 @@ def serialize_hidden_region(
             encrypted_index,
             encrypted_data,
             padding,
+        ]
+    )
+
+
+def serialize_hidden_region_prefix(
+    *,
+    passphrase: str,
+    kdf_profile: KdfProfileName,
+    dek: bytes,
+    index: VolumeIndex,
+    salt: bytes | None = None,
+) -> bytes:
+    """Serialize the hidden header and encrypted index prefix without file data or padding."""
+    region_salt = salt or secrets.token_bytes(HIDDEN_SALT_BYTES)
+    kek = KdfService.derive_key(passphrase, region_salt, kdf_profile)
+    wrapped_dek = EncryptionService.wrap_dek(kek, dek, HIDDEN_HEADER_AAD)
+    encrypted_index = _encrypt_hidden_index(index, dek)
+
+    return b"".join(
+        [
+            region_salt,
+            wrapped_dek.nonce,
+            wrapped_dek.ciphertext,
+            len(encrypted_index).to_bytes(4, "big"),
+            encrypted_index,
         ]
     )
 

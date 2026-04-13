@@ -143,6 +143,54 @@ def test_hidden_add_does_not_change_outer_file_listing(tmp_path: Path) -> None:
     assert [item.path for item in hidden_files] == ["hidden.txt"]
 
 
+def test_hidden_add_appends_after_existing_hidden_encrypted_data(tmp_path: Path) -> None:
+    vault_path = tmp_path / "hidden-append.vault"
+    first_file = tmp_path / "first.txt"
+    second_file = tmp_path / "second.txt"
+    first_file.write_text("alpha", encoding="utf-8")
+    second_file.write_text("beta", encoding="utf-8")
+
+    VaultService.create_empty_vault(vault_path, passphrase="OuterPassphrase123!")
+    VaultService.create_hidden_volume(
+        vault_path,
+        outer_passphrase="OuterPassphrase123!",
+        inner_passphrase="InnerPassphrase123!",
+        hidden_size=2048,
+    )
+    VaultService.add_hidden_paths(
+        vault_path,
+        outer_passphrase="OuterPassphrase123!",
+        inner_passphrase="InnerPassphrase123!",
+        sources=[first_file],
+    )
+
+    before = VaultService._unlock_hidden(
+        vault_path,
+        outer_passphrase="OuterPassphrase123!",
+        inner_passphrase="InnerPassphrase123!",
+    )
+    first_record = before.hidden.index.files[0]
+    prior_hidden_length = len(before.hidden.encrypted_data)
+
+    VaultService.add_hidden_paths(
+        vault_path,
+        outer_passphrase="OuterPassphrase123!",
+        inner_passphrase="InnerPassphrase123!",
+        sources=[second_file],
+    )
+
+    after = VaultService._unlock_hidden(
+        vault_path,
+        outer_passphrase="OuterPassphrase123!",
+        inner_passphrase="InnerPassphrase123!",
+    )
+    first_after = next(item for item in after.hidden.index.files if item.path == "first.txt")
+    second_after = next(item for item in after.hidden.index.files if item.path == "second.txt")
+
+    assert first_after.chunks == first_record.chunks
+    assert second_after.chunks[0].offset >= prior_hidden_length
+
+
 def test_hidden_operations_require_configured_hidden_volume(tmp_path: Path) -> None:
     vault_path = tmp_path / "no-hidden.vault"
     source_file = tmp_path / "note.txt"

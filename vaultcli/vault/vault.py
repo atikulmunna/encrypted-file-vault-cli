@@ -35,9 +35,12 @@ from vaultcli.errors import (
 from vaultcli.passphrases import enforce_passphrase_policy
 from vaultcli.vault.hidden import (
     UnlockedHiddenRegion,
+    UnlockedHiddenRegionMetadata,
     build_hidden_region,
     serialize_hidden_region,
+    serialize_hidden_region_prefix,
     unlock_hidden_region,
+    unlock_hidden_region_metadata,
 )
 
 INDEX_AAD: Final[bytes] = b"vaultcli:outer-index"
@@ -122,6 +125,14 @@ class UnlockedHiddenVault:
 
     outer: UnlockedVault
     hidden: UnlockedHiddenRegion
+
+
+@dataclass(frozen=True, slots=True)
+class UnlockedHiddenVaultMetadata:
+    """Unlocked hidden-volume metadata plus the outer container context."""
+
+    outer: UnlockedVaultMetadata
+    hidden: UnlockedHiddenRegionMetadata
 
 
 @dataclass(frozen=True, slots=True)
@@ -304,12 +315,13 @@ class VaultService:
         sources: Sequence[str | Path],
     ) -> list[AddedVaultFile]:
         """Encrypt and add files or directories to the hidden volume."""
-        unlocked = cls._unlock_hidden(
+        unlocked = cls._unlock_hidden_metadata(
             Path(vault_path),
             outer_passphrase=outer_passphrase,
             inner_passphrase=inner_passphrase,
         )
-        encrypted_data = bytearray(unlocked.hidden.encrypted_data)
+        existing_hidden_length = cls._existing_hidden_encrypted_length(unlocked)
+        encrypted_data = bytearray()
         files_by_path = {file.path: file for file in unlocked.hidden.index.files}
         added_files: list[AddedVaultFile] = []
         now = int(time.time())
@@ -321,6 +333,7 @@ class VaultService:
                     source_path=source_path,
                     dek=unlocked.hidden.dek,
                     encrypted_data=encrypted_data,
+                    base_offset=existing_hidden_length,
                     added_at=now,
                 )
                 files_by_path[internal_path] = file_record
@@ -335,12 +348,16 @@ class VaultService:
             reserved_tail_start=None,
             files=tuple(sorted(files_by_path.values(), key=lambda item: item.path)),
         )
-        cls._write_updated_hidden_volume(
+        cls._write_updated_hidden_volume_from_segments(
             unlocked,
             outer_passphrase=outer_passphrase,
             inner_passphrase=inner_passphrase,
             index=new_index,
-            hidden_encrypted_data=bytes(encrypted_data),
+            hidden_encrypted_data_segments=(
+                *cls._existing_hidden_encrypted_file_segments(unlocked),
+                bytes(encrypted_data),
+            ),
+            hidden_encrypted_length=existing_hidden_length + len(encrypted_data),
         )
         return added_files
 
@@ -582,6 +599,29 @@ class VaultService:
         return UnlockedHiddenVault(outer=outer, hidden=hidden)
 
     @classmethod
+    def _unlock_hidden_metadata(
+        cls,
+        path: Path,
+        *,
+        outer_passphrase: str,
+        inner_passphrase: str,
+    ) -> UnlockedHiddenVaultMetadata:
+        outer = cls._unlock_metadata(path, passphrase=outer_passphrase)
+        if outer.index.reserved_tail_start is None:
+            raise HiddenVolumeError("No hidden volume is configured for this vault.")
+
+        hidden_offset = outer.index.reserved_tail_start
+        hidden_size = outer.record.encrypted_data_size - cls._existing_outer_encrypted_length(outer)
+        hidden = unlock_hidden_region_metadata(
+            path,
+            offset=hidden_offset,
+            size=hidden_size,
+            passphrase=inner_passphrase,
+            kdf_profile=outer.record.header.kdf_profile,
+        )
+        return UnlockedHiddenVaultMetadata(outer=outer, hidden=hidden)
+
+    @classmethod
     def _unwrap_dek(
         cls,
         record: ContainerRecord | ContainerMetadataRecord,
@@ -729,6 +769,44 @@ class VaultService:
         )
 
     @classmethod
+    def _write_updated_hidden_volume_from_segments(
+        cls,
+        unlocked: UnlockedHiddenVaultMetadata,
+        *,
+        outer_passphrase: str,
+        inner_passphrase: str,
+        index: VolumeIndex,
+        hidden_encrypted_data_segments: Sequence[bytes | EncryptedDataFileSegment],
+        hidden_encrypted_length: int,
+    ) -> Path:
+        prefix = serialize_hidden_region_prefix(
+            passphrase=inner_passphrase,
+            kdf_profile=unlocked.outer.record.header.kdf_profile,
+            dek=unlocked.hidden.dek,
+            index=index,
+            salt=unlocked.hidden.record.salt,
+        )
+        padding_length = unlocked.hidden.record.total_size - len(prefix) - hidden_encrypted_length
+        if padding_length < 0:
+            raise HiddenVolumeError("Hidden volume is full; not enough reserved space remains.")
+
+        hidden_region_segments: tuple[bytes | EncryptedDataFileSegment, ...] = (
+            prefix,
+            *hidden_encrypted_data_segments,
+            secrets.token_bytes(padding_length),
+        )
+        return cls._write_updated_vault_from_segments(
+            unlocked.outer,
+            passphrase=outer_passphrase,
+            index=unlocked.outer.index,
+            encrypted_data_segments=(
+                *cls._existing_encrypted_file_segments(unlocked.outer, include_hidden=False),
+                *hidden_region_segments,
+            ),
+            outer_encrypted_length=cls._existing_outer_encrypted_length(unlocked.outer),
+        )
+
+    @classmethod
     def _existing_encrypted_file_segments(
         cls,
         unlocked: UnlockedVaultMetadata,
@@ -796,11 +874,39 @@ class VaultService:
             ),
         )
 
+    @classmethod
+    def _existing_hidden_encrypted_file_segments(
+        cls,
+        unlocked: UnlockedHiddenVaultMetadata,
+    ) -> tuple[EncryptedDataFileSegment, ...]:
+        hidden_length = cls._existing_hidden_encrypted_length(unlocked)
+        hidden_region_start = unlocked.outer.index.reserved_tail_start
+        if hidden_length == 0:
+            return ()
+        if hidden_region_start is None:
+            raise HiddenVolumeError("No hidden volume is configured for this vault.")
+
+        return (
+            EncryptedDataFileSegment(
+                path=unlocked.outer.path,
+                offset=hidden_region_start + unlocked.hidden.record.encrypted_data_offset,
+                length=hidden_length,
+            ),
+        )
+
     @staticmethod
     def _existing_outer_encrypted_length(unlocked: UnlockedVaultMetadata) -> int:
         if unlocked.index.reserved_tail_start is None:
             return unlocked.record.encrypted_data_size
         return unlocked.index.reserved_tail_start - unlocked.record.encrypted_data_offset
+
+    @staticmethod
+    def _existing_hidden_encrypted_length(unlocked: UnlockedHiddenVaultMetadata) -> int:
+        used = 0
+        for file_record in unlocked.hidden.index.files:
+            for chunk in file_record.chunks:
+                used = max(used, chunk.offset + chunk.ciphertext_size)
+        return used
 
     @staticmethod
     def _encrypted_data_segment_length(
