@@ -37,7 +37,6 @@ from vaultcli.vault.hidden import (
     UnlockedHiddenRegion,
     UnlockedHiddenRegionMetadata,
     build_hidden_region,
-    serialize_hidden_region,
     serialize_hidden_region_prefix,
     unlock_hidden_region,
     unlock_hidden_region_metadata,
@@ -528,7 +527,7 @@ class VaultService:
     def read_locked_info(cls, path: str | Path) -> LockedVaultInfo:
         """Read public header metadata without decrypting the encrypted index."""
         target = Path(path)
-        record = ContainerReader.read_path(target)
+        record = ContainerReader.read_path_metadata(target)
         return LockedVaultInfo(
             path=target,
             format_version=record.header.version,
@@ -554,14 +553,7 @@ class VaultService:
     def list_files(cls, path: str | Path, *, passphrase: str) -> list[ListedVaultFile]:
         """List authenticated file metadata for the outer volume."""
         unlocked = cls._unlock_metadata(Path(path), passphrase=passphrase)
-        return [
-            ListedVaultFile(
-                path=file.path,
-                original_size=file.original_size,
-                added_at=file.added_at,
-            )
-            for file in unlocked.index.files
-        ]
+        return cls._list_index_files(unlocked.index)
 
     @classmethod
     def list_hidden_files(
@@ -577,14 +569,7 @@ class VaultService:
             outer_passphrase=outer_passphrase,
             inner_passphrase=inner_passphrase,
         )
-        return [
-            ListedVaultFile(
-                path=file.path,
-                original_size=file.original_size,
-                added_at=file.added_at,
-            )
-            for file in unlocked.hidden.index.files
-        ]
+        return cls._list_index_files(unlocked.hidden.index)
 
     @classmethod
     def _unlock(cls, path: Path, *, passphrase: str) -> UnlockedVault:
@@ -731,71 +716,6 @@ class VaultService:
             encrypted_data_segments=tuple(encrypted_data_segments),
         )
         return ContainerWriter.write_atomic(unlocked.path, request)
-
-    @classmethod
-    def _write_updated_vault(
-        cls,
-        unlocked: UnlockedVault,
-        *,
-        passphrase: str,
-        index: VolumeIndex,
-        outer_encrypted_data: bytes,
-        hidden_region: bytes,
-    ) -> Path:
-        resolved_index = cls._resolve_hidden_boundary(index, len(outer_encrypted_data))
-        encrypted_index = cls._encrypt_index(resolved_index, unlocked.dek)
-        encrypted_data_segments = tuple(
-            segment for segment in (outer_encrypted_data, hidden_region) if segment
-        )
-        encrypted_data_length = sum(len(segment) for segment in encrypted_data_segments)
-        container_size = 32 + 32 + 12 + 48 + 4 + len(encrypted_index) + encrypted_data_length
-        new_header = PublicHeader(
-            version=unlocked.record.header.version,
-            flags=unlocked.record.header.flags,
-            kdf_profile=unlocked.record.header.kdf_profile,
-            container_size=container_size,
-        )
-        kek = KdfService.derive_key(passphrase, unlocked.record.outer_salt, new_header.kdf_profile)
-        wrapped_dek = EncryptionService.wrap_dek(
-            kek,
-            unlocked.dek,
-            pack_public_header(new_header),
-        )
-        request = ContainerWriteRequest(
-            header=new_header,
-            outer_salt=unlocked.record.outer_salt,
-            wrapped_dek=wrapped_dek,
-            encrypted_index=encrypted_index,
-            encrypted_data_segments=encrypted_data_segments,
-        )
-        return ContainerWriter.write_atomic(unlocked.path, request)
-
-    @classmethod
-    def _write_updated_hidden_volume(
-        cls,
-        unlocked: UnlockedHiddenVault,
-        *,
-        outer_passphrase: str,
-        inner_passphrase: str,
-        index: VolumeIndex,
-        hidden_encrypted_data: bytes,
-    ) -> Path:
-        hidden_region = serialize_hidden_region(
-            passphrase=inner_passphrase,
-            kdf_profile=unlocked.outer.record.header.kdf_profile,
-            dek=unlocked.hidden.dek,
-            index=index,
-            encrypted_data=hidden_encrypted_data,
-            total_size=unlocked.hidden.record.total_size,
-            salt=unlocked.hidden.record.salt,
-        )
-        return cls._write_updated_vault(
-            unlocked.outer,
-            passphrase=outer_passphrase,
-            index=unlocked.outer.index,
-            outer_encrypted_data=unlocked.outer.outer_encrypted_data,
-            hidden_region=hidden_region,
-        )
 
     @classmethod
     def _write_updated_hidden_volume_from_segments(
@@ -1023,21 +943,6 @@ class VaultService:
         )
 
     @classmethod
-    def _decrypt_file(cls, file_record: FileRecord, encrypted_data: bytes, dek: bytes) -> bytes:
-        plaintext_parts: list[bytes] = []
-        for plaintext_chunk in cls._iter_decrypted_chunks(
-            file_record,
-            InMemoryCiphertextSource(encrypted_data),
-            dek,
-        ):
-            plaintext_parts.append(plaintext_chunk)
-
-        plaintext = b"".join(plaintext_parts)
-        if sha256(plaintext).hexdigest() != file_record.sha256:
-            raise ContainerFormatError(f"SHA-256 mismatch while extracting {file_record.path}.")
-        return plaintext
-
-    @classmethod
     def _decrypt_file_to_path(
         cls,
         file_record: FileRecord,
@@ -1129,6 +1034,17 @@ class VaultService:
             path=unlocked.outer.path,
             base_offset=hidden_region_start + unlocked.hidden.record.encrypted_data_offset,
         )
+
+    @staticmethod
+    def _list_index_files(index: VolumeIndex) -> list[ListedVaultFile]:
+        return [
+            ListedVaultFile(
+                path=file.path,
+                original_size=file.original_size,
+                added_at=file.added_at,
+            )
+            for file in index.files
+        ]
 
     @staticmethod
     def _get_file_record(index: VolumeIndex, internal_path: str) -> FileRecord:
