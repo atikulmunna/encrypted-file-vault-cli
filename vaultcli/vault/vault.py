@@ -127,7 +127,7 @@ class VaultService:
     ) -> Path:
         """Re-wrap the existing DEK with a KEK derived from a new passphrase."""
         enforce_passphrase_policy(new_passphrase, allow_weak=allow_weak_passphrase)
-        unlocked = cls._unlock_metadata(Path(vault_path), passphrase=current_passphrase)
+        unlocked = cls._unlock_outer_metadata(Path(vault_path), passphrase=current_passphrase)
         return cls._write_updated_vault_from_segments(
             unlocked,
             passphrase=new_passphrase,
@@ -148,7 +148,7 @@ class VaultService:
     ) -> Path:
         """Append a hidden-volume region and reserve the tail for outer writes."""
         enforce_passphrase_policy(inner_passphrase, allow_weak=allow_weak_passphrase)
-        unlocked = cls._unlock_metadata(Path(vault_path), passphrase=outer_passphrase)
+        unlocked = cls._unlock_outer_metadata(Path(vault_path), passphrase=outer_passphrase)
         if unlocked.index.reserved_tail_start is not None:
             raise HiddenVolumeError("Hidden volume already configured for this vault.")
 
@@ -183,7 +183,7 @@ class VaultService:
         sources: Sequence[str | Path],
     ) -> list[AddedVaultFile]:
         """Encrypt and add one or more source files/directories to the outer volume."""
-        unlocked = cls._unlock_metadata(Path(vault_path), passphrase=passphrase)
+        unlocked = cls._unlock_outer_metadata(Path(vault_path), passphrase=passphrase)
         outer_encrypted_length = cls._existing_outer_encrypted_length(unlocked)
         encrypted_data = bytearray()
         files_by_path = {file.path: file for file in unlocked.index.files}
@@ -234,7 +234,7 @@ class VaultService:
         sources: Sequence[str | Path],
     ) -> list[AddedVaultFile]:
         """Encrypt and add files or directories to the hidden volume."""
-        unlocked = cls._unlock_hidden_metadata(
+        unlocked = cls._unlock_hidden_state(
             Path(vault_path),
             outer_passphrase=outer_passphrase,
             inner_passphrase=inner_passphrase,
@@ -295,7 +295,7 @@ class VaultService:
         if not extract_all and internal_path is None:
             raise ContainerFormatError("Specify an internal path or use --all.")
 
-        unlocked = cls._unlock_metadata(Path(vault_path), passphrase=passphrase)
+        unlocked = cls._unlock_outer_metadata(Path(vault_path), passphrase=passphrase)
         ciphertext_source = cls._outer_ciphertext_source(unlocked)
         target_dir = Path(output_dir)
         target_dir.mkdir(parents=True, exist_ok=True)
@@ -345,7 +345,7 @@ class VaultService:
         if not extract_all and internal_path is None:
             raise ContainerFormatError("Specify an internal path or use --all.")
 
-        unlocked = cls._unlock_hidden_metadata(
+        unlocked = cls._unlock_hidden_state(
             Path(vault_path),
             outer_passphrase=outer_passphrase,
             inner_passphrase=inner_passphrase,
@@ -401,7 +401,7 @@ class VaultService:
     @classmethod
     def verify_unlocked(cls, path: str | Path, *, passphrase: str) -> VerificationResult:
         """Perform authenticated verification of the active outer volume."""
-        unlocked = cls._unlock_metadata(Path(path), passphrase=passphrase)
+        unlocked = cls._unlock_outer_metadata(Path(path), passphrase=passphrase)
         ciphertext_source = cls._outer_ciphertext_source(unlocked)
         checked_chunks = 0
 
@@ -426,7 +426,7 @@ class VaultService:
         inner_passphrase: str,
     ) -> VerificationResult:
         """Perform authenticated verification of the hidden volume."""
-        unlocked = cls._unlock_hidden_metadata(
+        unlocked = cls._unlock_hidden_state(
             Path(path),
             outer_passphrase=outer_passphrase,
             inner_passphrase=inner_passphrase,
@@ -461,7 +461,7 @@ class VaultService:
     @classmethod
     def read_unlocked_info(cls, path: str | Path, *, passphrase: str) -> UnlockedVaultInfo:
         """Read authenticated outer-volume metadata with the supplied passphrase."""
-        unlocked = cls._unlock_metadata(Path(path), passphrase=passphrase)
+        unlocked = cls._unlock_outer_metadata(Path(path), passphrase=passphrase)
         return UnlockedVaultInfo(
             path=unlocked.path,
             active_volume="outer",
@@ -481,7 +481,7 @@ class VaultService:
         inner_passphrase: str,
     ) -> UnlockedVaultInfo:
         """Read authenticated hidden-volume metadata."""
-        unlocked = cls._unlock_hidden_metadata(
+        unlocked = cls._unlock_hidden_state(
             Path(path),
             outer_passphrase=outer_passphrase,
             inner_passphrase=inner_passphrase,
@@ -499,7 +499,7 @@ class VaultService:
     @classmethod
     def list_files(cls, path: str | Path, *, passphrase: str) -> list[ListedVaultFile]:
         """List authenticated file metadata for the outer volume."""
-        unlocked = cls._unlock_metadata(Path(path), passphrase=passphrase)
+        unlocked = cls._unlock_outer_metadata(Path(path), passphrase=passphrase)
         return cls._list_index_files(unlocked.index)
 
     @classmethod
@@ -511,7 +511,7 @@ class VaultService:
         inner_passphrase: str,
     ) -> list[ListedVaultFile]:
         """List authenticated file metadata for the hidden volume."""
-        unlocked = cls._unlock_hidden_metadata(
+        unlocked = cls._unlock_hidden_state(
             Path(path),
             outer_passphrase=outer_passphrase,
             inner_passphrase=inner_passphrase,
@@ -520,26 +520,15 @@ class VaultService:
 
     @classmethod
     def _unlock(cls, path: Path, *, passphrase: str) -> UnlockedVault:
-        unlocked = cls._unlock_metadata(path, passphrase=passphrase)
-        outer_encrypted_data = cls._outer_ciphertext_source(unlocked).read(
-            0,
-            cls._existing_outer_encrypted_length(unlocked),
-        )
-        hidden_region = b"".join(
-            cls._read_segment_bytes(segment)
-            for segment in cls._existing_hidden_file_segments(unlocked)
-        )
-        return UnlockedVault(
-            path=path,
-            record=unlocked.record,
-            dek=unlocked.dek,
-            index=unlocked.index,
-            outer_encrypted_data=outer_encrypted_data,
-            hidden_region=hidden_region,
-        )
+        return cls._materialize_outer(cls._unlock_outer_metadata(path, passphrase=passphrase))
 
     @classmethod
     def _unlock_metadata(cls, path: Path, *, passphrase: str) -> UnlockedVaultMetadata:
+        """Compatibility wrapper around the metadata-first outer unlock path."""
+        return cls._unlock_outer_metadata(path, passphrase=passphrase)
+
+    @classmethod
+    def _unlock_outer_metadata(cls, path: Path, *, passphrase: str) -> UnlockedVaultMetadata:
         record = ContainerReader.read_path_metadata(path)
         dek = cls._unwrap_dek(record, passphrase=passphrase)
         index = cls._decrypt_index(record, dek=dek)
@@ -553,22 +542,13 @@ class VaultService:
         outer_passphrase: str,
         inner_passphrase: str,
     ) -> UnlockedHiddenVault:
-        unlocked = cls._unlock_hidden_metadata(
-            path,
-            outer_passphrase=outer_passphrase,
-            inner_passphrase=inner_passphrase,
+        return cls._materialize_hidden(
+            cls._unlock_hidden_state(
+                path,
+                outer_passphrase=outer_passphrase,
+                inner_passphrase=inner_passphrase,
+            )
         )
-        outer = cls._unlock(path, passphrase=outer_passphrase)
-        hidden = MaterializedHiddenRegion(
-            record=unlocked.hidden.record,
-            dek=unlocked.hidden.dek,
-            index=unlocked.hidden.index,
-            encrypted_data=cls._hidden_ciphertext_source(unlocked).read(
-                0,
-                cls._existing_hidden_encrypted_length(unlocked),
-            ),
-        )
-        return UnlockedHiddenVault(outer=outer, hidden=hidden)
 
     @classmethod
     def _unlock_hidden_metadata(
@@ -578,7 +558,22 @@ class VaultService:
         outer_passphrase: str,
         inner_passphrase: str,
     ) -> UnlockedHiddenVaultMetadata:
-        outer = cls._unlock_metadata(path, passphrase=outer_passphrase)
+        """Compatibility wrapper around the metadata-first hidden unlock path."""
+        return cls._unlock_hidden_state(
+            path,
+            outer_passphrase=outer_passphrase,
+            inner_passphrase=inner_passphrase,
+        )
+
+    @classmethod
+    def _unlock_hidden_state(
+        cls,
+        path: Path,
+        *,
+        outer_passphrase: str,
+        inner_passphrase: str,
+    ) -> UnlockedHiddenVaultMetadata:
+        outer = cls._unlock_outer_metadata(path, passphrase=outer_passphrase)
         if outer.index.reserved_tail_start is None:
             raise HiddenVolumeError("No hidden volume is configured for this vault.")
 
@@ -592,6 +587,40 @@ class VaultService:
             kdf_profile=outer.record.header.kdf_profile,
         )
         return UnlockedHiddenVaultMetadata(outer=outer, hidden=hidden)
+
+    @classmethod
+    def _materialize_outer(cls, unlocked: UnlockedVaultMetadata) -> UnlockedVault:
+        outer_encrypted_data = cls._outer_ciphertext_source(unlocked).read(
+            0,
+            cls._existing_outer_encrypted_length(unlocked),
+        )
+        hidden_region = b"".join(
+            cls._read_segment_bytes(segment)
+            for segment in cls._existing_hidden_file_segments(unlocked)
+        )
+        return UnlockedVault(
+            path=unlocked.path,
+            record=unlocked.record,
+            dek=unlocked.dek,
+            index=unlocked.index,
+            outer_encrypted_data=outer_encrypted_data,
+            hidden_region=hidden_region,
+        )
+
+    @classmethod
+    def _materialize_hidden(cls, unlocked: UnlockedHiddenVaultMetadata) -> UnlockedHiddenVault:
+        return UnlockedHiddenVault(
+            outer=cls._materialize_outer(unlocked.outer),
+            hidden=MaterializedHiddenRegion(
+                record=unlocked.hidden.record,
+                dek=unlocked.hidden.dek,
+                index=unlocked.hidden.index,
+                encrypted_data=cls._hidden_ciphertext_source(unlocked).read(
+                    0,
+                    cls._existing_hidden_encrypted_length(unlocked),
+                ),
+            ),
+        )
 
     @classmethod
     def _unwrap_dek(
