@@ -261,3 +261,65 @@ def test_hidden_authenticated_reads_do_not_require_full_unlock(
 
     assert [item.path for item in listed] == ["inner.txt"]
     assert extracted[0].output_path.read_text(encoding="utf-8") == "metadata hidden unlock path"
+
+
+def test_hidden_info_reports_authenticated_hidden_metadata(tmp_path: Path) -> None:
+    vault_path = tmp_path / "hidden-info.vault"
+    hidden_source = tmp_path / "inner.txt"
+    hidden_source.write_text("hidden info payload", encoding="utf-8")
+
+    VaultService.create_empty_vault(vault_path, passphrase="OuterPassphrase123!")
+    VaultService.create_hidden_volume(
+        vault_path,
+        outer_passphrase="OuterPassphrase123!",
+        inner_passphrase="InnerPassphrase123!",
+        hidden_size=2048,
+    )
+    VaultService.add_hidden_paths(
+        vault_path,
+        outer_passphrase="OuterPassphrase123!",
+        inner_passphrase="InnerPassphrase123!",
+        sources=[hidden_source],
+    )
+
+    info = VaultService.read_hidden_info(
+        vault_path,
+        outer_passphrase="OuterPassphrase123!",
+        inner_passphrase="InnerPassphrase123!",
+    )
+
+    assert info.active_volume == "hidden"
+    assert info.file_count == 1
+    assert info.encrypted_size > 0
+
+
+def test_verify_hidden_succeeds_for_valid_hidden_volume(tmp_path: Path) -> None:
+    vault_path = tmp_path / "hidden-verify.vault"
+    hidden_source = tmp_path / "inner.txt"
+    hidden_source.write_text("hidden verify payload", encoding="utf-8")
+
+    VaultService.create_empty_vault(vault_path, passphrase="OuterPassphrase123!")
+    VaultService.create_hidden_volume(
+        vault_path,
+        outer_passphrase="OuterPassphrase123!",
+        inner_passphrase="InnerPassphrase123!",
+        hidden_size=2048,
+    )
+    VaultService.add_hidden_paths(
+        vault_path,
+        outer_passphrase="OuterPassphrase123!",
+        inner_passphrase="InnerPassphrase123!",
+        sources=[hidden_source],
+    )
+
+    result = VaultService.verify_hidden(
+        vault_path,
+        outer_passphrase="OuterPassphrase123!",
+        inner_passphrase="InnerPassphrase123!",
+    )
+
+    assert result.mode == "unlocked"
+    assert result.active_volume == "hidden"
+    assert result.status == "verified"
+    assert result.checked_files == 1
+    assert result.checked_chunks == 1

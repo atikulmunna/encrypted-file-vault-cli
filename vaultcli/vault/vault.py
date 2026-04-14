@@ -524,6 +524,35 @@ class VaultService:
         )
 
     @classmethod
+    def verify_hidden(
+        cls,
+        path: str | Path,
+        *,
+        outer_passphrase: str,
+        inner_passphrase: str,
+    ) -> VerificationResult:
+        """Perform authenticated verification of the hidden volume."""
+        unlocked = cls._unlock_hidden_metadata(
+            Path(path),
+            outer_passphrase=outer_passphrase,
+            inner_passphrase=inner_passphrase,
+        )
+        ciphertext_source = cls._hidden_ciphertext_source(unlocked)
+        checked_chunks = 0
+
+        for file_record in unlocked.hidden.index.files:
+            cls._verify_file(file_record, ciphertext_source, unlocked.hidden.dek)
+            checked_chunks += len(file_record.chunks)
+
+        return VerificationResult(
+            mode="unlocked",
+            active_volume="hidden",
+            status="verified",
+            checked_files=len(unlocked.hidden.index.files),
+            checked_chunks=checked_chunks,
+        )
+
+    @classmethod
     def read_locked_info(cls, path: str | Path) -> LockedVaultInfo:
         """Read public header metadata without decrypting the encrypted index."""
         target = Path(path)
@@ -547,6 +576,30 @@ class VaultService:
             created_at=unlocked.index.created_at,
             file_count=len(unlocked.index.files),
             encrypted_size=cls._existing_outer_encrypted_length(unlocked),
+        )
+
+    @classmethod
+    def read_hidden_info(
+        cls,
+        path: str | Path,
+        *,
+        outer_passphrase: str,
+        inner_passphrase: str,
+    ) -> UnlockedVaultInfo:
+        """Read authenticated hidden-volume metadata."""
+        unlocked = cls._unlock_hidden_metadata(
+            Path(path),
+            outer_passphrase=outer_passphrase,
+            inner_passphrase=inner_passphrase,
+        )
+        return UnlockedVaultInfo(
+            path=unlocked.outer.path,
+            active_volume="hidden",
+            format_version=unlocked.outer.record.header.version,
+            kdf_profile=unlocked.outer.record.header.kdf_profile,
+            created_at=unlocked.hidden.index.created_at,
+            file_count=len(unlocked.hidden.index.files),
+            encrypted_size=cls._existing_hidden_encrypted_length(unlocked),
         )
 
     @classmethod
