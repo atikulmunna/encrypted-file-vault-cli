@@ -4,21 +4,18 @@ from __future__ import annotations
 
 import secrets
 import time
-from collections.abc import Iterator, Sequence
-from dataclasses import dataclass
-from hashlib import sha256
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Final
 
 from vaultcli.container.format import PublicHeader, pack_public_header
 from vaultcli.container.index import (
-    ChunkRecord,
     FileRecord,
     VolumeIndex,
     deserialize_index,
     serialize_index,
 )
-from vaultcli.container.reader import ContainerMetadataRecord, ContainerReader, ContainerRecord
+from vaultcli.container.reader import ContainerMetadataRecord, ContainerReader
 from vaultcli.container.writer import (
     ContainerWriter,
     ContainerWriteRequest,
@@ -33,141 +30,38 @@ from vaultcli.errors import (
     VaultFileNotFoundError,
 )
 from vaultcli.passphrases import enforce_passphrase_policy
+from vaultcli.vault.ciphertext import (
+    DEFAULT_CHUNK_SIZE as CHUNK_SIZE_DEFAULT,
+)
+from vaultcli.vault.ciphertext import (
+    CiphertextSource,
+    FileCiphertextSource,
+    InMemoryCiphertextSource,
+    decrypt_file_to_path,
+    encrypt_file_from_path,
+    verify_file,
+)
 from vaultcli.vault.hidden import (
-    UnlockedHiddenRegion,
-    UnlockedHiddenRegionMetadata,
     build_hidden_region,
     serialize_hidden_region_prefix,
-    unlock_hidden_region,
     unlock_hidden_region_metadata,
+)
+from vaultcli.vault.models import (
+    AddedVaultFile,
+    ExtractedVaultFile,
+    ListedVaultFile,
+    LockedVaultInfo,
+    MaterializedHiddenRegion,
+    UnlockedHiddenVault,
+    UnlockedHiddenVaultMetadata,
+    UnlockedVault,
+    UnlockedVaultInfo,
+    UnlockedVaultMetadata,
+    VerificationResult,
 )
 
 INDEX_AAD: Final[bytes] = b"vaultcli:outer-index"
-DEFAULT_CHUNK_SIZE: Final[int] = 1024 * 1024
-
-
-@dataclass(frozen=True, slots=True)
-class LockedVaultInfo:
-    """Metadata visible without decrypting the encrypted index."""
-
-    path: Path
-    format_version: int
-    kdf_profile: KdfProfileName
-    container_size: int
-
-
-@dataclass(frozen=True, slots=True)
-class UnlockedVaultInfo:
-    """Authenticated metadata for the active outer volume."""
-
-    path: Path
-    active_volume: str
-    format_version: int
-    kdf_profile: KdfProfileName
-    created_at: int
-    file_count: int
-    encrypted_size: int
-
-
-@dataclass(frozen=True, slots=True)
-class ListedVaultFile:
-    """A single listed file entry."""
-
-    path: str
-    original_size: int
-    added_at: int
-
-
-@dataclass(frozen=True, slots=True)
-class AddedVaultFile:
-    """A single file added to a vault."""
-
-    path: str
-    original_size: int
-
-
-@dataclass(frozen=True, slots=True)
-class ExtractedVaultFile:
-    """A single file extracted from a vault."""
-
-    path: str
-    output_path: Path
-    original_size: int
-
-
-@dataclass(frozen=True, slots=True)
-class VerificationResult:
-    """Result of a vault verification run."""
-
-    mode: str
-    active_volume: str | None
-    status: str
-    checked_files: int
-    checked_chunks: int
-
-
-@dataclass(frozen=True, slots=True)
-class InMemoryCiphertextSource:
-    """Ciphertext backed by in-memory bytes."""
-
-    data: bytes
-
-    def read(self, offset: int, length: int) -> bytes:
-        return self.data[offset : offset + length]
-
-
-@dataclass(frozen=True, slots=True)
-class FileCiphertextSource:
-    """Ciphertext backed by a region inside a container file."""
-
-    path: Path
-    base_offset: int
-
-    def read(self, offset: int, length: int) -> bytes:
-        with self.path.open("rb") as handle:
-            handle.seek(self.base_offset + offset)
-            return handle.read(length)
-
-
-CiphertextSource = InMemoryCiphertextSource | FileCiphertextSource
-
-
-@dataclass(frozen=True, slots=True)
-class UnlockedVault:
-    """Unlocked outer-volume material needed for authenticated operations."""
-
-    path: Path
-    record: ContainerRecord
-    dek: bytes
-    index: VolumeIndex
-    outer_encrypted_data: bytes
-    hidden_region: bytes
-
-
-@dataclass(frozen=True, slots=True)
-class UnlockedHiddenVault:
-    """Unlocked hidden-volume material plus the outer container context."""
-
-    outer: UnlockedVault
-    hidden: UnlockedHiddenRegion
-
-
-@dataclass(frozen=True, slots=True)
-class UnlockedHiddenVaultMetadata:
-    """Unlocked hidden-volume metadata plus the outer container context."""
-
-    outer: UnlockedVaultMetadata
-    hidden: UnlockedHiddenRegionMetadata
-
-
-@dataclass(frozen=True, slots=True)
-class UnlockedVaultMetadata:
-    """Unlocked vault metadata without loading encrypted data bytes."""
-
-    path: Path
-    record: ContainerMetadataRecord
-    dek: bytes
-    index: VolumeIndex
+DEFAULT_CHUNK_SIZE: Final[int] = CHUNK_SIZE_DEFAULT
 
 
 class VaultService:
@@ -298,7 +192,7 @@ class VaultService:
 
         for source in sources:
             for internal_path, source_path in _iter_source_files(Path(source)):
-                file_record = cls._encrypt_file_from_path(
+                file_record = encrypt_file_from_path(
                     internal_path=internal_path,
                     source_path=source_path,
                     dek=unlocked.dek,
@@ -353,7 +247,7 @@ class VaultService:
 
         for source in sources:
             for internal_path, source_path in _iter_source_files(Path(source)):
-                file_record = cls._encrypt_file_from_path(
+                file_record = encrypt_file_from_path(
                     internal_path=internal_path,
                     source_path=source_path,
                     dek=unlocked.hidden.dek,
@@ -419,7 +313,7 @@ class VaultService:
                 raise ContainerFormatError(
                     f"Refusing to overwrite existing file without --overwrite: {destination}"
                 )
-            cls._decrypt_file_to_path(
+            decrypt_file_to_path(
                 file_record,
                 ciphertext_source,
                 unlocked.dek,
@@ -473,7 +367,7 @@ class VaultService:
                 raise ContainerFormatError(
                     f"Refusing to overwrite existing file without --overwrite: {destination}"
                 )
-            cls._decrypt_file_to_path(
+            decrypt_file_to_path(
                 file_record,
                 ciphertext_source,
                 unlocked.hidden.dek,
@@ -512,7 +406,7 @@ class VaultService:
         checked_chunks = 0
 
         for file_record in unlocked.index.files:
-            cls._verify_file(file_record, ciphertext_source, unlocked.dek)
+            verify_file(file_record, ciphertext_source, unlocked.dek)
             checked_chunks += len(file_record.chunks)
 
         return VerificationResult(
@@ -541,7 +435,7 @@ class VaultService:
         checked_chunks = 0
 
         for file_record in unlocked.hidden.index.files:
-            cls._verify_file(file_record, ciphertext_source, unlocked.hidden.dek)
+            verify_file(file_record, ciphertext_source, unlocked.hidden.dek)
             checked_chunks += len(file_record.chunks)
 
         return VerificationResult(
@@ -626,15 +520,20 @@ class VaultService:
 
     @classmethod
     def _unlock(cls, path: Path, *, passphrase: str) -> UnlockedVault:
-        record = ContainerReader.read_path(path)
-        dek = cls._unwrap_dek(record, passphrase=passphrase)
-        index = cls._decrypt_index(record, dek=dek)
-        outer_encrypted_data, hidden_region = cls._split_outer_and_hidden(record, index)
+        unlocked = cls._unlock_metadata(path, passphrase=passphrase)
+        outer_encrypted_data = cls._outer_ciphertext_source(unlocked).read(
+            0,
+            cls._existing_outer_encrypted_length(unlocked),
+        )
+        hidden_region = b"".join(
+            cls._read_segment_bytes(segment)
+            for segment in cls._existing_hidden_file_segments(unlocked)
+        )
         return UnlockedVault(
             path=path,
-            record=record,
-            dek=dek,
-            index=index,
+            record=unlocked.record,
+            dek=unlocked.dek,
+            index=unlocked.index,
             outer_encrypted_data=outer_encrypted_data,
             hidden_region=hidden_region,
         )
@@ -654,14 +553,20 @@ class VaultService:
         outer_passphrase: str,
         inner_passphrase: str,
     ) -> UnlockedHiddenVault:
+        unlocked = cls._unlock_hidden_metadata(
+            path,
+            outer_passphrase=outer_passphrase,
+            inner_passphrase=inner_passphrase,
+        )
         outer = cls._unlock(path, passphrase=outer_passphrase)
-        if not outer.hidden_region:
-            raise HiddenVolumeError("No hidden volume is configured for this vault.")
-
-        hidden = unlock_hidden_region(
-            outer.hidden_region,
-            passphrase=inner_passphrase,
-            kdf_profile=outer.record.header.kdf_profile,
+        hidden = MaterializedHiddenRegion(
+            record=unlocked.hidden.record,
+            dek=unlocked.hidden.dek,
+            index=unlocked.hidden.index,
+            encrypted_data=cls._hidden_ciphertext_source(unlocked).read(
+                0,
+                cls._existing_hidden_encrypted_length(unlocked),
+            ),
         )
         return UnlockedHiddenVault(outer=outer, hidden=hidden)
 
@@ -691,7 +596,7 @@ class VaultService:
     @classmethod
     def _unwrap_dek(
         cls,
-        record: ContainerRecord | ContainerMetadataRecord,
+        record: ContainerMetadataRecord,
         *,
         passphrase: str,
     ) -> bytes:
@@ -702,7 +607,7 @@ class VaultService:
     @classmethod
     def _decrypt_index(
         cls,
-        record: ContainerRecord | ContainerMetadataRecord,
+        record: ContainerMetadataRecord,
         *,
         dek: bytes,
     ) -> VolumeIndex:
@@ -919,147 +824,6 @@ class VaultService:
             for segment in segments
         )
 
-    @classmethod
-    def _encrypt_file_from_path(
-        cls,
-        *,
-        internal_path: str,
-        source_path: Path,
-        dek: bytes,
-        encrypted_data: bytearray,
-        base_offset: int = 0,
-        added_at: int,
-        chunk_size: int = DEFAULT_CHUNK_SIZE,
-    ) -> FileRecord:
-        chunks: list[ChunkRecord] = []
-        encrypted_size = 0
-        original_size = 0
-        digest = sha256()
-
-        with source_path.open("rb") as handle:
-            current_chunk = handle.read(chunk_size)
-            chunk_index = 0
-
-            if current_chunk == b"":
-                payload = EncryptionService.encrypt_chunk(
-                    dek,
-                    b"",
-                    _chunk_aad(internal_path, 0, True),
-                )
-                offset = base_offset + len(encrypted_data)
-                encrypted_data.extend(payload.ciphertext)
-                chunks.append(
-                    ChunkRecord(
-                        nonce=payload.nonce,
-                        offset=offset,
-                        ciphertext_size=len(payload.ciphertext),
-                    )
-                )
-                encrypted_size += len(payload.ciphertext)
-            else:
-                while True:
-                    next_chunk = handle.read(chunk_size)
-                    is_final = next_chunk == b""
-                    original_size += len(current_chunk)
-                    digest.update(current_chunk)
-
-                    payload = EncryptionService.encrypt_chunk(
-                        dek,
-                        current_chunk,
-                        _chunk_aad(internal_path, chunk_index, is_final),
-                    )
-                    offset = base_offset + len(encrypted_data)
-                    encrypted_data.extend(payload.ciphertext)
-                    chunks.append(
-                        ChunkRecord(
-                            nonce=payload.nonce,
-                            offset=offset,
-                            ciphertext_size=len(payload.ciphertext),
-                        )
-                    )
-                    encrypted_size += len(payload.ciphertext)
-
-                    if is_final:
-                        break
-
-                    current_chunk = next_chunk
-                    chunk_index += 1
-
-        return FileRecord(
-            path=internal_path,
-            original_size=original_size,
-            encrypted_size=encrypted_size,
-            chunk_size=chunk_size,
-            chunks=tuple(chunks),
-            added_at=added_at,
-            sha256=digest.hexdigest(),
-        )
-
-    @classmethod
-    def _decrypt_file_to_path(
-        cls,
-        file_record: FileRecord,
-        ciphertext_source: CiphertextSource,
-        dek: bytes,
-        destination: Path,
-    ) -> None:
-        digest = sha256()
-        try:
-            with destination.open("wb") as handle:
-                for plaintext_chunk in cls._iter_decrypted_chunks(
-                    file_record,
-                    ciphertext_source,
-                    dek,
-                ):
-                    digest.update(plaintext_chunk)
-                    handle.write(plaintext_chunk)
-        except Exception:
-            if destination.exists():
-                destination.unlink()
-            raise
-
-        if digest.hexdigest() != file_record.sha256:
-            if destination.exists():
-                destination.unlink()
-            raise ContainerFormatError(f"SHA-256 mismatch while extracting {file_record.path}.")
-
-    @classmethod
-    def _verify_file(
-        cls,
-        file_record: FileRecord,
-        ciphertext_source: CiphertextSource,
-        dek: bytes,
-    ) -> None:
-        digest = sha256()
-        for plaintext_chunk in cls._iter_decrypted_chunks(file_record, ciphertext_source, dek):
-            digest.update(plaintext_chunk)
-        if digest.hexdigest() != file_record.sha256:
-            raise ContainerFormatError(f"SHA-256 mismatch while verifying {file_record.path}.")
-
-    @classmethod
-    def _iter_decrypted_chunks(
-        cls,
-        file_record: FileRecord,
-        ciphertext_source: CiphertextSource,
-        dek: bytes,
-    ) -> Iterator[bytes]:
-        for chunk_index, chunk in enumerate(file_record.chunks):
-            ciphertext = ciphertext_source.read(chunk.offset, chunk.ciphertext_size)
-            if len(ciphertext) != chunk.ciphertext_size:
-                raise ContainerFormatError(
-                    f"Encrypted chunk for {file_record.path} is truncated at chunk {chunk_index}."
-                )
-
-            yield EncryptionService.decrypt_chunk(
-                dek,
-                EncryptedPayload(nonce=chunk.nonce, ciphertext=ciphertext),
-                _chunk_aad(
-                    file_record.path,
-                    chunk_index,
-                    chunk_index == len(file_record.chunks) - 1,
-                ),
-            )
-
     @staticmethod
     def _outer_ciphertext_source(
         unlocked: UnlockedVaultMetadata | UnlockedVault,
@@ -1107,18 +871,13 @@ class VaultService:
         raise VaultFileNotFoundError(f"Internal path not found in vault: {internal_path}")
 
     @staticmethod
-    def _split_outer_and_hidden(record: ContainerRecord, index: VolumeIndex) -> tuple[bytes, bytes]:
-        if index.reserved_tail_start is None:
-            return record.encrypted_data, b""
-
-        reserved_tail_offset = index.reserved_tail_start - record.encrypted_data_offset
-        if reserved_tail_offset < 0 or reserved_tail_offset > len(record.encrypted_data):
-            raise HiddenVolumeError("Reserved tail start is outside the encrypted data region.")
-
-        return (
-            record.encrypted_data[:reserved_tail_offset],
-            record.encrypted_data[reserved_tail_offset:],
-        )
+    def _read_segment_bytes(segment: EncryptedDataFileSegment) -> bytes:
+        with segment.path.open("rb") as handle:
+            handle.seek(segment.offset)
+            data = handle.read(segment.length)
+        if len(data) != segment.length:
+            raise ContainerFormatError("Encrypted data segment is truncated on disk.")
+        return data
 
     @classmethod
     def _resolve_hidden_boundary(
@@ -1164,7 +923,3 @@ def _iter_source_files(source: Path) -> list[tuple[str, Path]]:
         ]
 
     raise ContainerFormatError(f"Source path does not exist or is unsupported: {source}")
-
-
-def _chunk_aad(internal_path: str, chunk_index: int, is_final: bool) -> bytes:
-    return f"{internal_path}|chunk={chunk_index}|final={int(is_final)}".encode()

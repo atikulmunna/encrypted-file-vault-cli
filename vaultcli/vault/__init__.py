@@ -1,14 +1,14 @@
 """High-level vault operations package for VaultCLI."""
 
-from vaultcli.vault.vault import (
+from vaultcli.vault.models import (
     AddedVaultFile,
     ExtractedVaultFile,
     ListedVaultFile,
     LockedVaultInfo,
     UnlockedVaultInfo,
-    VaultService,
     VerificationResult,
 )
+from vaultcli.vault.vault import VaultService
 
 __all__ = [
     "AddedVaultFile",
