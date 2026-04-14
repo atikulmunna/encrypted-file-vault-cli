@@ -6,9 +6,9 @@ The project is being built in public with a strong emphasis on auditable cryptog
 
 ## Project Status
 
-VaultCLI is currently in the early implementation stage.
+VaultCLI is currently in the active hardening and polish stage.
 
-The repository is being built issue by issue with implementation, tests, and CI tightened together. The current public slice includes core cryptographic services, the container reader/writer, the main CLI workflows, authenticated verification, rekeying, wipe support, and hidden-volume management commands.
+The original implementation backlog has been completed and the repository is now focused on tightening behavior, testing corruption cases, refining the internal API, and improving developer-facing polish. The current public slice includes the core cryptographic services, the container reader/writer, the main CLI workflows, authenticated verification, rekeying, wipe support, hidden-volume management, and metadata-first read paths.
 
 Track progress here:
 - Issues: https://github.com/atikulmunna/encrypted-file-vault-cli/issues
@@ -34,6 +34,8 @@ Track progress here:
 - `vault rekey`
 - `vault wipe`
 - `vault hidden create`
+- `vault hidden info`
+- `vault hidden verify`
 - `vault hidden list`
 - `vault hidden add`
 - `vault hidden extract`
@@ -62,7 +64,7 @@ The SRS and private working notes are intentionally kept out of git. Public deve
 
 VaultCLI is not production-ready yet. Until the implementation is complete, reviewed, and tested, this repository should be treated as an active build project rather than a finished security product.
 
-If you plan to use this project for real secrets later, please wait for the hardening, testing, and review milestones to be completed first.
+If you plan to use this project for real secrets later, please wait for the hardening, review, and broader validation work to be completed first.
 
 ## Roadmap
 
