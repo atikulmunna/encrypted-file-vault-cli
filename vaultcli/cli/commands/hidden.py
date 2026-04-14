@@ -171,6 +171,150 @@ def hidden_list_command(
     )
 
 
+@app.command("info")
+def hidden_info_command(
+    ctx: typer.Context,
+    vault_path: Path = typer.Argument(..., help="Path to the target vault container."),
+    outer_passphrase: str | None = typer.Option(
+        None,
+        "--outer-passphrase",
+        help="Current outer-volume passphrase.",
+        hide_input=True,
+    ),
+    outer_passphrase_env: str | None = typer.Option(
+        None,
+        "--outer-passphrase-env",
+        help="Environment variable containing the outer-volume passphrase.",
+    ),
+    outer_passphrase_file: Path | None = typer.Option(
+        None,
+        "--outer-passphrase-file",
+        help="Path to a UTF-8 text file containing the outer-volume passphrase.",
+    ),
+    inner_passphrase: str | None = typer.Option(
+        None,
+        "--inner-passphrase",
+        help="Passphrase for the hidden volume.",
+        hide_input=True,
+    ),
+    inner_passphrase_env: str | None = typer.Option(
+        None,
+        "--inner-passphrase-env",
+        help="Environment variable containing the hidden-volume passphrase.",
+    ),
+    inner_passphrase_file: Path | None = typer.Option(
+        None,
+        "--inner-passphrase-file",
+        help="Path to a UTF-8 text file containing the hidden-volume passphrase.",
+    ),
+) -> None:
+    """Show authenticated hidden-volume metadata."""
+    state = ctx.obj if isinstance(ctx.obj, AppState) else AppState()
+    resolved_outer_passphrase = require_named_passphrase(
+        option_name="outer-passphrase",
+        direct=outer_passphrase,
+        env_name=outer_passphrase_env,
+        file_path=outer_passphrase_file,
+        prompt_text="Outer vault passphrase",
+    )
+    resolved_inner_passphrase = require_named_passphrase(
+        option_name="inner-passphrase",
+        direct=inner_passphrase,
+        env_name=inner_passphrase_env,
+        file_path=inner_passphrase_file,
+        prompt_text="Hidden volume passphrase",
+    )
+    info = VaultService.read_hidden_info(
+        vault_path,
+        outer_passphrase=resolved_outer_passphrase,
+        inner_passphrase=resolved_inner_passphrase,
+    )
+    emit(
+        {
+            "vault": str(info.path),
+            "mode": "unlocked",
+            "active_volume": info.active_volume,
+            "format": f"v{info.format_version}",
+            "kdf_profile": info.kdf_profile.value,
+            "created_at": info.created_at,
+            "files": info.file_count,
+            "encrypted_size": info.encrypted_size,
+        },
+        json_mode=state.json,
+    )
+
+
+@app.command("verify")
+def hidden_verify_command(
+    ctx: typer.Context,
+    vault_path: Path = typer.Argument(..., help="Path to the target vault container."),
+    outer_passphrase: str | None = typer.Option(
+        None,
+        "--outer-passphrase",
+        help="Current outer-volume passphrase.",
+        hide_input=True,
+    ),
+    outer_passphrase_env: str | None = typer.Option(
+        None,
+        "--outer-passphrase-env",
+        help="Environment variable containing the outer-volume passphrase.",
+    ),
+    outer_passphrase_file: Path | None = typer.Option(
+        None,
+        "--outer-passphrase-file",
+        help="Path to a UTF-8 text file containing the outer-volume passphrase.",
+    ),
+    inner_passphrase: str | None = typer.Option(
+        None,
+        "--inner-passphrase",
+        help="Passphrase for the hidden volume.",
+        hide_input=True,
+    ),
+    inner_passphrase_env: str | None = typer.Option(
+        None,
+        "--inner-passphrase-env",
+        help="Environment variable containing the hidden-volume passphrase.",
+    ),
+    inner_passphrase_file: Path | None = typer.Option(
+        None,
+        "--inner-passphrase-file",
+        help="Path to a UTF-8 text file containing the hidden-volume passphrase.",
+    ),
+) -> None:
+    """Verify authenticated hidden-volume contents."""
+    state = ctx.obj if isinstance(ctx.obj, AppState) else AppState()
+    resolved_outer_passphrase = require_named_passphrase(
+        option_name="outer-passphrase",
+        direct=outer_passphrase,
+        env_name=outer_passphrase_env,
+        file_path=outer_passphrase_file,
+        prompt_text="Outer vault passphrase",
+    )
+    resolved_inner_passphrase = require_named_passphrase(
+        option_name="inner-passphrase",
+        direct=inner_passphrase,
+        env_name=inner_passphrase_env,
+        file_path=inner_passphrase_file,
+        prompt_text="Hidden volume passphrase",
+    )
+    result = VaultService.verify_hidden(
+        vault_path,
+        outer_passphrase=resolved_outer_passphrase,
+        inner_passphrase=resolved_inner_passphrase,
+    )
+    emit(
+        {
+            "vault": str(vault_path),
+            "mode": result.mode,
+            "active_volume": result.active_volume,
+            "status": result.status,
+            "checked_files": result.checked_files,
+            "checked_chunks": result.checked_chunks,
+        },
+        json_mode=state.json,
+    )
+
+
 @app.command("add")
 def hidden_add_command(
     ctx: typer.Context,

@@ -83,6 +83,8 @@ def test_hidden_subcommand_is_registered() -> None:
     assert result.exit_code == 0
     assert "Create a hidden volume." in result.stdout
     assert runner.invoke(app, ["hidden", "list", "--help"]).exit_code == 0
+    assert runner.invoke(app, ["hidden", "info", "--help"]).exit_code == 0
+    assert runner.invoke(app, ["hidden", "verify", "--help"]).exit_code == 0
     assert runner.invoke(app, ["hidden", "add", "--help"]).exit_code == 0
     assert runner.invoke(app, ["hidden", "extract", "--help"]).exit_code == 0
 
@@ -634,6 +636,154 @@ def test_hidden_add_list_and_extract_commands_round_trip_file(tmp_path: Path) ->
     assert extract_payload["active_volume"] == "hidden"
     assert extract_payload["extracted"][0]["path"] == "inner.txt"
     assert (output_dir / "inner.txt").read_text(encoding="utf-8") == "hidden cli payload"
+
+
+def test_hidden_info_and_verify_commands_report_authenticated_metadata(tmp_path: Path) -> None:
+    vault_path = tmp_path / "hidden-info-verify-cli.vault"
+    hidden_source = tmp_path / "inner.txt"
+    hidden_source.write_text("hidden cli verify payload", encoding="utf-8")
+
+    assert runner.invoke(
+        app,
+        ["create", str(vault_path), "--passphrase", "OuterPassphrase123!"],
+    ).exit_code == 0
+    assert runner.invoke(
+        app,
+        [
+            "hidden",
+            "create",
+            str(vault_path),
+            "--hidden-size",
+            "2048",
+            "--outer-passphrase",
+            "OuterPassphrase123!",
+            "--inner-passphrase",
+            "InnerPassphrase123!",
+        ],
+    ).exit_code == 0
+    assert runner.invoke(
+        app,
+        [
+            "hidden",
+            "add",
+            str(vault_path),
+            str(hidden_source),
+            "--outer-passphrase",
+            "OuterPassphrase123!",
+            "--inner-passphrase",
+            "InnerPassphrase123!",
+        ],
+    ).exit_code == 0
+
+    info_result = runner.invoke(
+        app,
+        [
+            "--json",
+            "hidden",
+            "info",
+            str(vault_path),
+            "--outer-passphrase",
+            "OuterPassphrase123!",
+            "--inner-passphrase",
+            "InnerPassphrase123!",
+        ],
+    )
+    verify_result = runner.invoke(
+        app,
+        [
+            "--json",
+            "hidden",
+            "verify",
+            str(vault_path),
+            "--outer-passphrase",
+            "OuterPassphrase123!",
+            "--inner-passphrase",
+            "InnerPassphrase123!",
+        ],
+    )
+
+    assert info_result.exit_code == 0
+    assert verify_result.exit_code == 0
+    assert _load_json_output(info_result.stdout)["active_volume"] == "hidden"
+    assert _load_json_output(info_result.stdout)["files"] == 1
+    assert _load_json_output(verify_result.stdout)["active_volume"] == "hidden"
+    assert _load_json_output(verify_result.stdout)["status"] == "verified"
+
+
+def test_hidden_info_and_verify_support_env_and_file_sources(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    vault_path = tmp_path / "hidden-info-sources-cli.vault"
+    hidden_source = tmp_path / "inner.txt"
+    hidden_source.write_text("hidden cli env file payload", encoding="utf-8")
+    inner_passphrase_file = tmp_path / "inner-passphrase.txt"
+    inner_passphrase_file.write_text("InnerPassphrase123!\n", encoding="utf-8")
+    monkeypatch.setenv("VAULTCLI_OUTER_HIDDEN_PASS", "OuterPassphrase123!")
+
+    assert runner.invoke(
+        app,
+        ["create", str(vault_path), "--passphrase-env", "VAULTCLI_OUTER_HIDDEN_PASS"],
+    ).exit_code == 0
+    assert runner.invoke(
+        app,
+        [
+            "hidden",
+            "create",
+            str(vault_path),
+            "--hidden-size",
+            "2048",
+            "--outer-passphrase-env",
+            "VAULTCLI_OUTER_HIDDEN_PASS",
+            "--inner-passphrase-file",
+            str(inner_passphrase_file),
+        ],
+    ).exit_code == 0
+    assert runner.invoke(
+        app,
+        [
+            "hidden",
+            "add",
+            str(vault_path),
+            str(hidden_source),
+            "--outer-passphrase-env",
+            "VAULTCLI_OUTER_HIDDEN_PASS",
+            "--inner-passphrase-file",
+            str(inner_passphrase_file),
+        ],
+    ).exit_code == 0
+
+    info_result = runner.invoke(
+        app,
+        [
+            "--json",
+            "hidden",
+            "info",
+            str(vault_path),
+            "--outer-passphrase-env",
+            "VAULTCLI_OUTER_HIDDEN_PASS",
+            "--inner-passphrase-file",
+            str(inner_passphrase_file),
+        ],
+    )
+    verify_result = runner.invoke(
+        app,
+        [
+            "--json",
+            "hidden",
+            "verify",
+            str(vault_path),
+            "--outer-passphrase-env",
+            "VAULTCLI_OUTER_HIDDEN_PASS",
+            "--inner-passphrase-file",
+            str(inner_passphrase_file),
+        ],
+    )
+
+    assert info_result.exit_code == 0
+    assert verify_result.exit_code == 0
+    assert _load_json_output(info_result.stdout)["active_volume"] == "hidden"
+    assert _load_json_output(verify_result.stdout)["checked_files"] == 1
 
 
 def test_hidden_add_does_not_change_outer_cli_listing(tmp_path: Path) -> None:
