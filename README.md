@@ -10,6 +10,8 @@ VaultCLI is currently in the active hardening and polish stage.
 
 The original implementation backlog has been completed and the repository is now focused on tightening behavior, testing corruption cases, refining the internal API, and improving developer-facing polish. The current public slice includes the core cryptographic services, the container reader/writer, the main CLI workflows, authenticated verification, rekeying, wipe support, hidden-volume management, and metadata-first read paths.
 
+In practice, this means the repository is feature-complete for its current v1 scope but is still being treated as a build-in-public security project rather than a finished release candidate.
+
 Track progress here:
 - Issues: https://github.com/atikulmunna/encrypted-file-vault-cli/issues
 
@@ -66,6 +68,23 @@ VaultCLI is not production-ready yet. Until the implementation is complete, revi
 
 If you plan to use this project for real secrets later, please wait for the hardening, review, and broader validation work to be completed first.
 
+Current caveats:
+- Hidden-volume support exists, but plausible-deniability claims should be treated as provisional until the format and threat model receive deeper external review.
+- The wipe command is best-effort only and should not be treated as guaranteed secure deletion on SSDs, flash storage, snapshots, or journaling filesystems.
+- Python memory handling is improved where practical, but this project does not claim absolute secret zeroization guarantees inside the interpreter.
+- This repository currently prioritizes correctness, transparency, and testability over performance tuning for very large real-world datasets.
+
+Suggested evaluation use:
+- local experimentation
+- code review and security review
+- CI and packaging validation
+- non-sensitive demo data
+
+Not yet recommended for:
+- high-risk secret storage
+- production backup of irreplaceable confidential data
+- environments that require independently reviewed deniability properties
+
 ## Roadmap
 
 The current implementation roadmap is tracked in GitHub Issues, including:
@@ -77,6 +96,12 @@ The current implementation roadmap is tracked in GitHub Issues, including:
 - authenticated verification
 - hidden-volume workflows
 - CI, packaging, and release hardening
+
+Current post-backlog focus:
+- parser and corruption hardening
+- larger end-to-end stress coverage
+- CLI failure-path polish
+- documentation and release-readiness cleanup
 
 ## Repository Scope
 
