@@ -183,3 +183,86 @@ def test_verify_hidden_rejects_truncated_reserved_tail(tmp_path: Path) -> None:
             outer_passphrase="OuterPassphrase123!",
             inner_passphrase="InnerPassphrase123!",
         )
+
+
+def test_hidden_info_rejects_seeded_hidden_header_mutations(tmp_path: Path) -> None:
+    vault_path = tmp_path / "hidden-header-mutate.vault"
+
+    VaultService.create_empty_vault(vault_path, passphrase="OuterPassphrase123!")
+    VaultService.create_hidden_volume(
+        vault_path,
+        outer_passphrase="OuterPassphrase123!",
+        inner_passphrase="InnerPassphrase123!",
+        hidden_size=2048,
+    )
+
+    unlocked = VaultService._unlock(vault_path, passphrase="OuterPassphrase123!")
+    hidden_region_start = unlocked.index.reserved_tail_start
+    assert hidden_region_start is not None
+
+    original = vault_path.read_bytes()
+    rng = random.Random(20260417)
+    header_end = hidden_region_start + 32 + 12 + 48
+    mutation_offsets = sorted(
+        {
+            rng.randrange(hidden_region_start, header_end)
+            for _ in range(min(8, max(1, header_end - hidden_region_start)))
+        }
+    )
+
+    for offset in mutation_offsets:
+        mutated = bytearray(original)
+        mutated[offset] ^= 0x01
+        vault_path.write_bytes(bytes(mutated))
+        with pytest.raises((ContainerFormatError, CryptoAuthenticationError, HiddenVolumeError)):
+            VaultService.read_hidden_info(
+                vault_path,
+                outer_passphrase="OuterPassphrase123!",
+                inner_passphrase="InnerPassphrase123!",
+            )
+
+    vault_path.write_bytes(original)
+
+
+def test_hidden_extract_rejects_truncated_hidden_ciphertext_chunk(tmp_path: Path) -> None:
+    vault_path = tmp_path / "hidden-chunk-truncate.vault"
+    hidden_source = tmp_path / "inner.txt"
+    hidden_source.write_text("hidden chunk truncate target", encoding="utf-8")
+
+    VaultService.create_empty_vault(vault_path, passphrase="OuterPassphrase123!")
+    VaultService.create_hidden_volume(
+        vault_path,
+        outer_passphrase="OuterPassphrase123!",
+        inner_passphrase="InnerPassphrase123!",
+        hidden_size=2048,
+    )
+    VaultService.add_hidden_paths(
+        vault_path,
+        outer_passphrase="OuterPassphrase123!",
+        inner_passphrase="InnerPassphrase123!",
+        sources=[hidden_source],
+    )
+
+    unlocked = VaultService._unlock_hidden(
+        vault_path,
+        outer_passphrase="OuterPassphrase123!",
+        inner_passphrase="InnerPassphrase123!",
+    )
+    hidden_region_start = unlocked.outer.index.reserved_tail_start
+    assert hidden_region_start is not None
+
+    chunk = unlocked.hidden.index.files[0].chunks[0]
+    chunk_end = hidden_region_start + unlocked.hidden.record.encrypted_data_offset + chunk.offset
+    chunk_end += chunk.ciphertext_size
+
+    original = vault_path.read_bytes()
+    vault_path.write_bytes(original[: chunk_end - 1] + original[chunk_end:])
+
+    with pytest.raises((ContainerFormatError, CryptoAuthenticationError, HiddenVolumeError)):
+        VaultService.extract_hidden_files(
+            vault_path,
+            outer_passphrase="OuterPassphrase123!",
+            inner_passphrase="InnerPassphrase123!",
+            output_dir=tmp_path / "out",
+            internal_path="inner.txt",
+        )
