@@ -1,10 +1,11 @@
 """Tests for container reader/writer behavior."""
 
+import random
 from pathlib import Path
 
 import pytest
 
-from vaultcli.container.format import PublicHeader
+from vaultcli.container.format import INDEX_DATA_OFFSET, INDEX_SIZE_OFFSET, PublicHeader
 from vaultcli.container.reader import ContainerReader
 from vaultcli.container.writer import (
     ContainerWriter,
@@ -212,3 +213,31 @@ def test_container_write_atomic_supports_file_backed_encrypted_data_segment(tmp_
 
     assert record.encrypted_index == encrypted_index
     assert record.encrypted_data == b"x" * 256
+
+
+def test_container_read_rejects_seeded_reserved_header_mutations() -> None:
+    request = _sample_request()
+    payload = bytearray(ContainerWriter.serialize_container(request))
+    rng = random.Random(20260415)
+
+    # Reserved bytes occupy the last 12 bytes of the 32-byte public header.
+    mutation_offsets = sorted({rng.randrange(20, 32) for _ in range(8)})
+
+    for offset in mutation_offsets:
+        mutated = bytearray(payload)
+        mutated[offset] ^= 0x01
+        with pytest.raises(ContainerFormatError):
+            ContainerReader.read_bytes(bytes(mutated))
+
+
+def test_container_read_rejects_seeded_oversized_index_lengths() -> None:
+    request = _sample_request()
+    payload = bytearray(ContainerWriter.serialize_container(request))
+    rng = random.Random(20260416)
+
+    for _ in range(8):
+        mutated = bytearray(payload)
+        oversized_index = len(payload) + rng.randrange(1, 50_000)
+        mutated[INDEX_SIZE_OFFSET:INDEX_DATA_OFFSET] = oversized_index.to_bytes(4, "big")
+        with pytest.raises(ContainerFormatError):
+            ContainerReader.read_bytes(bytes(mutated))
