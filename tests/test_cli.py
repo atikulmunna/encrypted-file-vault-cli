@@ -77,6 +77,26 @@ def test_create_command_supports_prompted_passphrase(tmp_path: Path) -> None:
     assert vault_path.exists()
 
 
+def test_create_command_rejects_multiple_passphrase_sources(tmp_path: Path, monkeypatch) -> None:
+    vault_path = tmp_path / "duplicate-source.vault"
+    monkeypatch.setenv("VAULTCLI_CREATE_PASS", "EnvPassphrase123!")
+
+    result = runner.invoke(
+        app,
+        [
+            "create",
+            str(vault_path),
+            "--passphrase",
+            "DirectPassphrase123!",
+            "--passphrase-env",
+            "VAULTCLI_CREATE_PASS",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "Choose only one passphrase source" in result.stderr
+
+
 def test_hidden_subcommand_is_registered() -> None:
     result = runner.invoke(app, ["hidden", "create", "--help"])
 
@@ -784,6 +804,85 @@ def test_hidden_info_and_verify_support_env_and_file_sources(
     assert verify_result.exit_code == 0
     assert _load_json_output(info_result.stdout)["active_volume"] == "hidden"
     assert _load_json_output(verify_result.stdout)["checked_files"] == 1
+
+
+def test_hidden_info_rejects_missing_outer_passphrase_env(tmp_path: Path) -> None:
+    vault_path = tmp_path / "hidden-missing-env.vault"
+
+    assert runner.invoke(
+        app,
+        ["create", str(vault_path), "--passphrase", "OuterPassphrase123!"],
+    ).exit_code == 0
+    assert runner.invoke(
+        app,
+        [
+            "hidden",
+            "create",
+            str(vault_path),
+            "--hidden-size",
+            "2048",
+            "--outer-passphrase",
+            "OuterPassphrase123!",
+            "--inner-passphrase",
+            "InnerPassphrase123!",
+        ],
+    ).exit_code == 0
+
+    result = runner.invoke(
+        app,
+        [
+            "hidden",
+            "info",
+            str(vault_path),
+            "--outer-passphrase-env",
+            "VAULTCLI_DOES_NOT_EXIST",
+            "--inner-passphrase",
+            "InnerPassphrase123!",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "VAULTCLI_DOES_NOT_EXIST" in result.stderr
+
+
+def test_hidden_verify_rejects_unreadable_inner_passphrase_file(tmp_path: Path) -> None:
+    vault_path = tmp_path / "hidden-bad-file.vault"
+    missing_file = tmp_path / "missing-passphrase.txt"
+
+    assert runner.invoke(
+        app,
+        ["create", str(vault_path), "--passphrase", "OuterPassphrase123!"],
+    ).exit_code == 0
+    assert runner.invoke(
+        app,
+        [
+            "hidden",
+            "create",
+            str(vault_path),
+            "--hidden-size",
+            "2048",
+            "--outer-passphrase",
+            "OuterPassphrase123!",
+            "--inner-passphrase",
+            "InnerPassphrase123!",
+        ],
+    ).exit_code == 0
+
+    result = runner.invoke(
+        app,
+        [
+            "hidden",
+            "verify",
+            str(vault_path),
+            "--outer-passphrase",
+            "OuterPassphrase123!",
+            "--inner-passphrase-file",
+            str(missing_file),
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "Could not read passphrase file" in result.stderr
 
 
 def test_hidden_add_does_not_change_outer_cli_listing(tmp_path: Path) -> None:
