@@ -68,6 +68,10 @@ VaultCLI is not production-ready yet. Until the implementation is complete, revi
 
 If you plan to use this project for real secrets later, please wait for the hardening, review, and broader validation work to be completed first.
 
+See also:
+- [Security Status](docs/security-status.md)
+- [Threat Model](docs/threat-model.md)
+
 Current caveats:
 - Hidden-volume support exists, but plausible-deniability claims should be treated as provisional until the format and threat model receive deeper external review.
 - The wipe command is best-effort only and should not be treated as guaranteed secure deletion on SSDs, flash storage, snapshots, or journaling filesystems.
