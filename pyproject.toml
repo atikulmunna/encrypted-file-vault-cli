@@ -36,7 +36,7 @@ typer = "^0.17.4"
 pytest = "^8.4.0"
 pytest-cov = "^7.0.0"
 mypy = "^1.18.0"
-ruff = "^0.12.0"
+ruff = ">=0.12,<0.16"
 
 [tool.poetry.scripts]
 vault = "vaultcli.__main__:main"
