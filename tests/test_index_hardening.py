@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import random
+
 import msgpack
 import pytest
 
-from vaultcli.container.index import deserialize_index
+from vaultcli.container.index import VolumeIndex, deserialize_index, serialize_index
 from vaultcli.errors import ContainerFormatError
 
 
@@ -136,3 +138,54 @@ def test_deserialize_index_rejects_seeded_invalid_chunk_mutations() -> None:
         payload = msgpack.packb(mutated, use_bin_type=True)
         with pytest.raises(ContainerFormatError):
             deserialize_index(payload)
+
+
+def test_deserialize_index_handles_seeded_byte_flips_without_crashing() -> None:
+    base_index = VolumeIndex(
+        version=1,
+        created_at=1743000000,
+        reserved_tail_start=4096,
+        files=(),
+    )
+    payload = bytearray(serialize_index(base_index))
+    rng = random.Random(20260418)
+    mutation_offsets = sorted(
+        {rng.randrange(0, len(payload)) for _ in range(min(12, len(payload)))}
+    )
+
+    for offset in mutation_offsets:
+        mutated = bytearray(payload)
+        mutated[offset] ^= 0x01
+        try:
+            decoded = deserialize_index(bytes(mutated))
+        except ContainerFormatError:
+            continue
+        else:
+            assert decoded.version == 1
+            assert decoded.created_at >= 0
+
+
+def test_deserialize_index_handles_seeded_truncations_without_crashing() -> None:
+    base_index = VolumeIndex(
+        version=1,
+        created_at=1743000000,
+        reserved_tail_start=None,
+        files=(),
+    )
+    payload = serialize_index(base_index)
+    truncation_points = {
+        max(1, len(payload) - 1),
+        max(1, len(payload) - 2),
+        max(1, len(payload) // 2),
+        1,
+    }
+
+    for size in truncation_points:
+        truncated = payload[:size]
+        try:
+            decoded = deserialize_index(truncated)
+        except ContainerFormatError:
+            continue
+        else:
+            assert decoded.version == 1
+            assert decoded.created_at >= 0
