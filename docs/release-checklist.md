@@ -27,7 +27,8 @@ Before a tag:
 1. Review [README.md](../README.md).
 2. Review [docs/security-status.md](security-status.md).
 3. Review [docs/threat-model.md](threat-model.md).
-4. Update caveats if behavior, non-goals, or security assumptions changed.
+4. Review [docs/audit-prep.md](audit-prep.md).
+5. Update caveats if behavior, non-goals, or security assumptions changed.
 
 ## Release Metadata
 
@@ -35,7 +36,8 @@ Before creating a tag:
 
 1. Verify the version in `pyproject.toml`.
 2. Verify the version in `vaultcli/__init__.py`.
-3. Prepare concise release notes that summarize:
+3. Prepare concise release notes using [docs/release-notes-template.md](release-notes-template.md).
+4. Make sure the notes summarize:
    - major user-facing changes
    - security caveats that still apply
    - any migration or compatibility notes

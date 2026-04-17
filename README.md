@@ -71,6 +71,7 @@ If you plan to use this project for real secrets later, please wait for the hard
 See also:
 - [Security Status](docs/security-status.md)
 - [Threat Model](docs/threat-model.md)
+- [Audit Prep](docs/audit-prep.md)
 
 Current caveats:
 - Hidden-volume support exists, but plausible-deniability claims should be treated as provisional until the format and threat model receive deeper external review.
@@ -106,6 +107,12 @@ Current post-backlog focus:
 - larger end-to-end stress coverage
 - CLI failure-path polish
 - documentation and release-readiness cleanup
+
+Reviewer-facing docs:
+- [Security Status](docs/security-status.md)
+- [Threat Model](docs/threat-model.md)
+- [Audit Prep](docs/audit-prep.md)
+- [Release Checklist](docs/release-checklist.md)
 
 ## Repository Scope
 
