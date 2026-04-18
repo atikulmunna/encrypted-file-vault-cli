@@ -369,6 +369,84 @@ def test_extract_all_command_recovers_directory_tree(tmp_path: Path) -> None:
     assert (output_dir / "source" / "docs" / "nested.txt").read_text(encoding="utf-8") == "nested"
 
 
+def test_extract_command_rejects_missing_internal_path_with_guidance(tmp_path: Path) -> None:
+    vault_path = tmp_path / "missing-path.vault"
+    source_file = tmp_path / "note.txt"
+    source_file.write_text("exists", encoding="utf-8")
+
+    assert runner.invoke(
+        app,
+        ["create", str(vault_path), "--passphrase", "MissingPathPassphrase123!"],
+    ).exit_code == 0
+    assert runner.invoke(
+        app,
+        [
+            "add",
+            str(vault_path),
+            str(source_file),
+            "--passphrase",
+            "MissingPathPassphrase123!",
+        ],
+    ).exit_code == 0
+
+    result = runner.invoke(
+        app,
+        [
+            "extract",
+            str(vault_path),
+            "does-not-exist.txt",
+            "--passphrase",
+            "MissingPathPassphrase123!",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "Internal path not found in vault" in result.stderr
+    assert "Run" in result.stderr
+    assert "list" in result.stderr
+
+
+def test_extract_command_rejects_existing_output_without_overwrite_hint(tmp_path: Path) -> None:
+    vault_path = tmp_path / "overwrite-guard.vault"
+    source_file = tmp_path / "note.txt"
+    source_file.write_text("fresh payload", encoding="utf-8")
+    output_dir = tmp_path / "existing-out"
+    output_dir.mkdir()
+    (output_dir / "note.txt").write_text("already here", encoding="utf-8")
+
+    assert runner.invoke(
+        app,
+        ["create", str(vault_path), "--passphrase", "OverwritePassphrase123!"],
+    ).exit_code == 0
+    assert runner.invoke(
+        app,
+        [
+            "add",
+            str(vault_path),
+            str(source_file),
+            "--passphrase",
+            "OverwritePassphrase123!",
+        ],
+    ).exit_code == 0
+
+    result = runner.invoke(
+        app,
+        [
+            "extract",
+            str(vault_path),
+            "note.txt",
+            "--passphrase",
+            "OverwritePassphrase123!",
+            "--output",
+            str(output_dir),
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "Refusing to overwrite existing file" in result.stderr
+    assert "--overwrite" in result.stderr
+
+
 def test_verify_command_supports_locked_and_unlocked_modes(tmp_path: Path) -> None:
     vault_path = tmp_path / "verify.vault"
     source_file = tmp_path / "secret.txt"
@@ -709,6 +787,63 @@ def test_hidden_add_list_and_extract_commands_round_trip_file(tmp_path: Path) ->
     assert extract_payload["active_volume"] == "hidden"
     assert extract_payload["extracted"][0]["path"] == "inner.txt"
     assert (output_dir / "inner.txt").read_text(encoding="utf-8") == "hidden cli payload"
+
+
+def test_hidden_extract_rejects_missing_internal_path_with_guidance(tmp_path: Path) -> None:
+    vault_path = tmp_path / "hidden-missing-path.vault"
+    hidden_source = tmp_path / "inner.txt"
+    hidden_source.write_text("hidden source", encoding="utf-8")
+
+    assert runner.invoke(
+        app,
+        ["create", str(vault_path), "--passphrase", "OuterPassphrase123!"],
+    ).exit_code == 0
+    assert runner.invoke(
+        app,
+        [
+            "hidden",
+            "create",
+            str(vault_path),
+            "--hidden-size",
+            "2048",
+            "--outer-passphrase",
+            "OuterPassphrase123!",
+            "--inner-passphrase",
+            "InnerPassphrase123!",
+        ],
+    ).exit_code == 0
+    assert runner.invoke(
+        app,
+        [
+            "hidden",
+            "add",
+            str(vault_path),
+            str(hidden_source),
+            "--outer-passphrase",
+            "OuterPassphrase123!",
+            "--inner-passphrase",
+            "InnerPassphrase123!",
+        ],
+    ).exit_code == 0
+
+    result = runner.invoke(
+        app,
+        [
+            "hidden",
+            "extract",
+            str(vault_path),
+            "missing.txt",
+            "--outer-passphrase",
+            "OuterPassphrase123!",
+            "--inner-passphrase",
+            "InnerPassphrase123!",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "Internal path not found in vault" in result.stderr
+    assert "Run" in result.stderr
+    assert "list" in result.stderr
 
 
 def test_hidden_info_and_verify_commands_report_authenticated_metadata(tmp_path: Path) -> None:

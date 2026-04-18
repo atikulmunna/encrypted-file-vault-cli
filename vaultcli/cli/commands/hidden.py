@@ -9,6 +9,7 @@ import typer
 from vaultcli.cli.output import emit
 from vaultcli.cli.passphrases import require_named_passphrase
 from vaultcli.cli.state import AppState
+from vaultcli.errors import ContainerFormatError, VaultFileNotFoundError
 from vaultcli.vault import VaultService
 
 app = typer.Typer(
@@ -399,7 +400,7 @@ def hidden_extract_command(
     vault_path: Path = typer.Argument(..., help="Path to the target vault container."),
     internal_path: str | None = typer.Argument(
         None,
-        help="Internal hidden-volume path to extract. Omit when using --all.",
+        help="Internal hidden-volume path to extract. Omit it when using --all.",
     ),
     outer_passphrase: str | None = typer.Option(
         None,
@@ -441,9 +442,13 @@ def hidden_extract_command(
     extract_all: bool = typer.Option(
         False,
         "--all",
-        help="Extract all files from the hidden volume.",
+        help="Extract every stored file from the hidden volume.",
     ),
-    overwrite: bool = typer.Option(False, "--overwrite", help="Overwrite existing files."),
+    overwrite: bool = typer.Option(
+        False,
+        "--overwrite",
+        help="Replace existing output files instead of failing safely.",
+    ),
 ) -> None:
     """Extract files from the hidden volume."""
     state = ctx.obj if isinstance(ctx.obj, AppState) else AppState()
@@ -461,15 +466,18 @@ def hidden_extract_command(
         file_path=inner_passphrase_file,
         prompt_text="Hidden volume passphrase",
     )
-    extracted_files = VaultService.extract_hidden_files(
-        vault_path,
-        outer_passphrase=resolved_outer_passphrase,
-        inner_passphrase=resolved_inner_passphrase,
-        output_dir=output_dir,
-        internal_path=internal_path,
-        extract_all=extract_all,
-        overwrite=overwrite,
-    )
+    try:
+        extracted_files = VaultService.extract_hidden_files(
+            vault_path,
+            outer_passphrase=resolved_outer_passphrase,
+            inner_passphrase=resolved_inner_passphrase,
+            output_dir=output_dir,
+            internal_path=internal_path,
+            extract_all=extract_all,
+            overwrite=overwrite,
+        )
+    except (ContainerFormatError, VaultFileNotFoundError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
     emit(
         {
             "vault": str(vault_path),

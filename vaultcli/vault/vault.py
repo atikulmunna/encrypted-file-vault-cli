@@ -293,7 +293,9 @@ class VaultService:
     ) -> list[ExtractedVaultFile]:
         """Decrypt one or all files from the outer volume to disk."""
         if not extract_all and internal_path is None:
-            raise ContainerFormatError("Specify an internal path or use --all.")
+            raise ContainerFormatError(
+                "Choose an internal path to extract, or pass --all to extract the full vault."
+            )
 
         unlocked = cls._unlock_outer_metadata(Path(vault_path), passphrase=passphrase)
         ciphertext_source = cls._outer_ciphertext_source(unlocked)
@@ -311,7 +313,8 @@ class VaultService:
             destination.parent.mkdir(parents=True, exist_ok=True)
             if destination.exists() and not overwrite:
                 raise ContainerFormatError(
-                    f"Refusing to overwrite existing file without --overwrite: {destination}"
+                    f"Refusing to overwrite existing file: {destination}. "
+                    "Pass --overwrite if you want to replace it."
                 )
             decrypt_file_to_path(
                 file_record,
@@ -343,7 +346,10 @@ class VaultService:
     ) -> list[ExtractedVaultFile]:
         """Decrypt one or all files from the hidden volume to disk."""
         if not extract_all and internal_path is None:
-            raise ContainerFormatError("Specify an internal path or use --all.")
+            raise ContainerFormatError(
+                "Choose an internal path to extract, or pass --all to extract "
+                "the full hidden volume."
+            )
 
         unlocked = cls._unlock_hidden_state(
             Path(vault_path),
@@ -365,7 +371,8 @@ class VaultService:
             destination.parent.mkdir(parents=True, exist_ok=True)
             if destination.exists() and not overwrite:
                 raise ContainerFormatError(
-                    f"Refusing to overwrite existing file without --overwrite: {destination}"
+                    f"Refusing to overwrite existing file: {destination}. "
+                    "Pass --overwrite if you want to replace it."
                 )
             decrypt_file_to_path(
                 file_record,
@@ -897,7 +904,10 @@ class VaultService:
         for file_record in index.files:
             if file_record.path == internal_path:
                 return file_record
-        raise VaultFileNotFoundError(f"Internal path not found in vault: {internal_path}")
+        raise VaultFileNotFoundError(
+            f"Internal path not found in vault: {internal_path}. "
+            "Run `vault list` first to inspect the stored paths."
+        )
 
     @staticmethod
     def _read_segment_bytes(segment: EncryptedDataFileSegment) -> bytes:

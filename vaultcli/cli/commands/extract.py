@@ -9,6 +9,7 @@ import typer
 from vaultcli.cli.output import emit
 from vaultcli.cli.passphrases import require_passphrase
 from vaultcli.cli.state import AppState
+from vaultcli.errors import ContainerFormatError, VaultFileNotFoundError
 from vaultcli.vault import VaultService
 
 
@@ -17,7 +18,7 @@ def extract_command(
     vault_path: Path = typer.Argument(..., help="Path to the target vault container."),
     internal_path: str | None = typer.Argument(
         None,
-        help="Internal vault path to extract. Omit when using --all.",
+        help="Internal vault path to extract. Omit it when using --all.",
     ),
     passphrase: str | None = typer.Option(
         None,
@@ -43,9 +44,13 @@ def extract_command(
     extract_all: bool = typer.Option(
         False,
         "--all",
-        help="Extract all files from the active volume.",
+        help="Extract every stored file from the outer volume.",
     ),
-    overwrite: bool = typer.Option(False, "--overwrite", help="Overwrite existing files."),
+    overwrite: bool = typer.Option(
+        False,
+        "--overwrite",
+        help="Replace existing output files instead of failing safely.",
+    ),
 ) -> None:
     """Unlock the outer volume and extract one path or the full tree."""
     state = ctx.obj if isinstance(ctx.obj, AppState) else AppState()
@@ -55,14 +60,17 @@ def extract_command(
         file_path=passphrase_file,
         prompt_text="Vault passphrase",
     )
-    extracted_files = VaultService.extract_files(
-        vault_path,
-        passphrase=resolved_passphrase,
-        output_dir=output_dir,
-        internal_path=internal_path,
-        extract_all=extract_all,
-        overwrite=overwrite,
-    )
+    try:
+        extracted_files = VaultService.extract_files(
+            vault_path,
+            passphrase=resolved_passphrase,
+            output_dir=output_dir,
+            internal_path=internal_path,
+            extract_all=extract_all,
+            overwrite=overwrite,
+        )
+    except (ContainerFormatError, VaultFileNotFoundError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
     emit(
         {
             "vault": str(vault_path),
