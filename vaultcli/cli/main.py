@@ -12,7 +12,14 @@ from vaultcli.cli.commands import add, create, extract, hidden, info, list_cmd, 
 from vaultcli.cli.state import AppState
 
 app = typer.Typer(
-    help="Security-focused CLI for encrypted file vaults.",
+    help=(
+        "Create, inspect, verify, and extract encrypted vault containers.\n\n"
+        "Start with `vault create MY.vault`, then use `vault add`, `vault list`, "
+        "and `vault extract` for day-to-day workflows."
+    ),
+    epilog=(
+        "Use `vault COMMAND --help` for command-specific examples and passphrase options."
+    ),
     no_args_is_help=True,
     add_completion=False,
 )

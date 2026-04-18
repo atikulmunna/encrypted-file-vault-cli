@@ -37,7 +37,7 @@ def info_command(
         help="Prompt for the vault passphrase and show authenticated metadata.",
     ),
 ) -> None:
-    """Show vault metadata."""
+    """Show public metadata, or unlock first for authenticated details."""
     state = ctx.obj if isinstance(ctx.obj, AppState) else AppState()
     resolved_passphrase = resolve_passphrase(
         direct=passphrase,

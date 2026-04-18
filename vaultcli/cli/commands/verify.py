@@ -42,7 +42,7 @@ def verify_command(
         help="Run structural-only verification without authenticating ciphertext.",
     ),
 ) -> None:
-    """Verify a vault container."""
+    """Verify a vault in locked or authenticated mode."""
     state = ctx.obj if isinstance(ctx.obj, AppState) else AppState()
     if locked:
         result = VaultService.verify_locked(vault_path)
@@ -56,8 +56,8 @@ def verify_command(
         )
         if resolved_passphrase is None:
             typer.echo(
-                "Pass --passphrase, --passphrase-env, --passphrase-file, "
-                "--prompt-passphrase, or use --locked.",
+                "Choose one of --passphrase, --passphrase-env, --passphrase-file, "
+                "--prompt-passphrase, or use --locked for structural-only verification.",
                 err=True,
             )
             raise typer.Exit(code=2)

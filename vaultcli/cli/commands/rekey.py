@@ -53,7 +53,7 @@ def rekey_command(
         help="Override the default minimum passphrase policy.",
     ),
 ) -> None:
-    """Rekey an existing vault."""
+    """Change the outer passphrase without re-encrypting stored file data."""
     state = ctx.obj if isinstance(ctx.obj, AppState) else AppState()
     resolved_current_passphrase = require_named_passphrase(
         option_name="current-passphrase",

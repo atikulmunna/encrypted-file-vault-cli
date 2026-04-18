@@ -11,7 +11,12 @@ from vaultcli.cli.passphrases import require_named_passphrase
 from vaultcli.cli.state import AppState
 from vaultcli.vault import VaultService
 
-app = typer.Typer(help="Manage hidden-volume operations.", add_completion=False)
+app = typer.Typer(
+    help=(
+        "Manage hidden-volume operations that require both the outer and inner passphrases."
+    ),
+    add_completion=False,
+)
 
 
 @app.command("create")

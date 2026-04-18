@@ -39,7 +39,7 @@ def create_command(
         case_sensitive=False,
     ),
 ) -> None:
-    """Create a new vault container."""
+    """Create a new outer vault and prompt for a passphrase if needed."""
     state = ctx.obj if isinstance(ctx.obj, AppState) else AppState()
     resolved_passphrase = require_passphrase(
         direct=passphrase,

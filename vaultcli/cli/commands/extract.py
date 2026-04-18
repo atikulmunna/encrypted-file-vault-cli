@@ -47,7 +47,7 @@ def extract_command(
     ),
     overwrite: bool = typer.Option(False, "--overwrite", help="Overwrite existing files."),
 ) -> None:
-    """Extract files from a vault."""
+    """Unlock the outer volume and extract one path or the full tree."""
     state = ctx.obj if isinstance(ctx.obj, AppState) else AppState()
     resolved_passphrase = require_passphrase(
         direct=passphrase,

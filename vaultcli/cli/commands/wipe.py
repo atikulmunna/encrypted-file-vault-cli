@@ -16,7 +16,7 @@ def wipe_command(
     paths: list[Path] = typer.Argument(..., help="One or more plaintext files to wipe."),
     passes: int = typer.Option(3, "--passes", help="Number of overwrite passes before deletion."),
 ) -> None:
-    """Securely wipe plaintext files."""
+    """Best-effort overwrite and delete plaintext files."""
     state = ctx.obj if isinstance(ctx.obj, AppState) else AppState()
     wiped_paths = [str(wipe_file(path, passes=passes)) for path in paths]
     emit(

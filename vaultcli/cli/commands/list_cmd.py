@@ -32,7 +32,7 @@ def list_command(
         help="Path to a UTF-8 text file containing the vault passphrase.",
     ),
 ) -> None:
-    """List authenticated contents of a vault."""
+    """Unlock the outer volume and list authenticated file entries."""
     state = ctx.obj if isinstance(ctx.obj, AppState) else AppState()
     resolved_passphrase = require_passphrase(
         direct=passphrase,

@@ -19,6 +19,7 @@ def test_root_help_shows_expected_commands() -> None:
     result = runner.invoke(app, ["--help"])
 
     assert result.exit_code == 0
+    assert "Start with `vault create MY.vault`" in result.stdout
     assert "create" in result.stdout
     assert "verify" in result.stdout
     assert "hidden" in result.stdout
@@ -99,8 +100,11 @@ def test_create_command_rejects_multiple_passphrase_sources(tmp_path: Path, monk
 
 def test_hidden_subcommand_is_registered() -> None:
     result = runner.invoke(app, ["hidden", "create", "--help"])
+    hidden_help = runner.invoke(app, ["hidden", "--help"])
 
     assert result.exit_code == 0
+    assert "outer and inner" in hidden_help.stdout
+    assert "passphrases" in hidden_help.stdout
     assert "Create a hidden volume." in result.stdout
     assert runner.invoke(app, ["hidden", "list", "--help"]).exit_code == 0
     assert runner.invoke(app, ["hidden", "info", "--help"]).exit_code == 0
@@ -406,6 +410,7 @@ def test_verify_command_requires_passphrase_without_locked_mode(tmp_path: Path) 
     verify_result = runner.invoke(app, ["verify", str(vault_path)])
 
     assert verify_result.exit_code != 0
+    assert "structural-only verification" in verify_result.stderr
     assert "--prompt-passphrase" in verify_result.stderr
 
 
@@ -843,6 +848,7 @@ def test_hidden_info_rejects_missing_outer_passphrase_env(tmp_path: Path) -> Non
 
     assert result.exit_code != 0
     assert "VAULTCLI_DOES_NOT_EXIST" in result.stderr
+    assert "Set it first" in result.stderr
 
 
 def test_hidden_verify_rejects_unreadable_inner_passphrase_file(tmp_path: Path) -> None:
@@ -883,6 +889,7 @@ def test_hidden_verify_rejects_unreadable_inner_passphrase_file(tmp_path: Path) 
 
     assert result.exit_code != 0
     assert "Could not read passphrase file" in result.stderr
+    assert "Check the path" in result.stderr
 
 
 def test_hidden_add_does_not_change_outer_cli_listing(tmp_path: Path) -> None:
