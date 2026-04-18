@@ -113,6 +113,7 @@ Reviewer-facing docs:
 - [Threat Model](docs/threat-model.md)
 - [Audit Prep](docs/audit-prep.md)
 - [Code Map](docs/code-map.md)
+- [RC Status](docs/release-candidate-status.md)
 - [Release Checklist](docs/release-checklist.md)
 
 ## Repository Scope
