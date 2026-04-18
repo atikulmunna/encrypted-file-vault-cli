@@ -175,6 +175,54 @@ def test_list_command_returns_empty_file_list_for_new_vault(tmp_path: Path) -> N
     assert payload["files"] == []
 
 
+def test_list_command_text_output_is_readable(tmp_path: Path) -> None:
+    vault_path = tmp_path / "list-text.vault"
+    source_file = tmp_path / "note.txt"
+    source_file.write_text("readable output", encoding="utf-8")
+
+    assert runner.invoke(
+        app,
+        ["create", str(vault_path), "--passphrase", "ReadabilityPassphrase123!"],
+    ).exit_code == 0
+    assert runner.invoke(
+        app,
+        [
+            "add",
+            str(vault_path),
+            str(source_file),
+            "--passphrase",
+            "ReadabilityPassphrase123!",
+        ],
+    ).exit_code == 0
+
+    result = runner.invoke(
+        app,
+        ["list", str(vault_path), "--passphrase", "ReadabilityPassphrase123!"],
+    )
+
+    assert result.exit_code == 0
+    assert "Files:" in result.stdout
+    assert "path=note.txt" in result.stdout
+
+
+def test_info_command_text_output_shows_empty_list_style(tmp_path: Path) -> None:
+    vault_path = tmp_path / "info-text.vault"
+
+    assert runner.invoke(
+        app,
+        ["create", str(vault_path), "--passphrase", "InfoPassphrase123!"],
+    ).exit_code == 0
+
+    result = runner.invoke(
+        app,
+        ["list", str(vault_path), "--passphrase", "InfoPassphrase123!"],
+    )
+
+    assert result.exit_code == 0
+    assert "Files:" in result.stdout
+    assert "- none" in result.stdout
+
+
 def test_add_and_extract_commands_round_trip_file(tmp_path: Path) -> None:
     vault_path = tmp_path / "roundtrip.vault"
     source_file = tmp_path / "note.txt"
