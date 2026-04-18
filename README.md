@@ -4,6 +4,110 @@ VaultCLI is a security-focused command-line tool for creating encrypted file vau
 
 The project is being built in public with a strong emphasis on auditable cryptography, practical usability, and a clean developer experience. The planned design uses modern authenticated encryption for file content, memory-hard key derivation for passphrases, and an offline-first workflow suitable for developers, privacy-conscious users, and automation environments.
 
+## Quick Start
+
+Install the project locally:
+
+```powershell
+python -m poetry install
+```
+
+Run the CLI through Poetry during development:
+
+```powershell
+python -m poetry run vault --help
+```
+
+Create a vault, add a file, inspect it, and extract it again:
+
+```powershell
+python -m poetry run vault create demo.vault --passphrase "CorrectHorseBatteryStaple123!"
+python -m poetry run vault add demo.vault .\notes.txt --passphrase "CorrectHorseBatteryStaple123!"
+python -m poetry run vault list demo.vault --passphrase "CorrectHorseBatteryStaple123!"
+python -m poetry run vault extract demo.vault notes.txt --passphrase "CorrectHorseBatteryStaple123!" --output .\restored
+```
+
+If you do not want the passphrase to appear in shell history, use one of the safer input paths:
+
+```powershell
+python -m poetry run vault create demo.vault
+python -m poetry run vault list demo.vault --prompt-passphrase
+python -m poetry run vault verify demo.vault --passphrase-env VAULTCLI_PASSPHRASE
+```
+
+## Install And Run
+
+Development workflow:
+
+```powershell
+python -m poetry install
+python -m poetry run vault --help
+```
+
+Build distributable artifacts:
+
+```powershell
+python -m poetry build
+```
+
+After installation, the CLI entrypoint is:
+
+```powershell
+vault --help
+```
+
+## Common Workflows
+
+Create a vault:
+
+```powershell
+python -m poetry run vault create secrets.vault
+```
+
+Inspect public metadata without unlocking:
+
+```powershell
+python -m poetry run vault info secrets.vault
+```
+
+Inspect authenticated metadata after unlocking:
+
+```powershell
+python -m poetry run vault info secrets.vault --prompt-passphrase
+```
+
+Add a directory tree:
+
+```powershell
+python -m poetry run vault add secrets.vault .\project-files --prompt-passphrase
+```
+
+Extract everything into a target folder:
+
+```powershell
+python -m poetry run vault extract secrets.vault --all --prompt-passphrase --output .\restore
+```
+
+Run structural-only verification:
+
+```powershell
+python -m poetry run vault verify secrets.vault --locked
+```
+
+Run authenticated verification:
+
+```powershell
+python -m poetry run vault verify secrets.vault --prompt-passphrase
+```
+
+Use environment variables or files for scripted workflows:
+
+```powershell
+$env:VAULTCLI_PASSPHRASE = "CorrectHorseBatteryStaple123!"
+python -m poetry run vault list secrets.vault --passphrase-env VAULTCLI_PASSPHRASE
+python -m poetry run vault rekey secrets.vault --current-passphrase-env VAULTCLI_PASSPHRASE --new-passphrase-file .\new-passphrase.txt
+```
+
 ## Project Status
 
 VaultCLI is currently in the active hardening and polish stage.
@@ -46,6 +150,7 @@ Track progress here:
 
 ```powershell
 python -m poetry install
+python -m poetry run vault --help
 python -m poetry run ruff check .
 python -m poetry run mypy vaultcli
 python -m poetry run pytest --cov=vaultcli --cov-report=term-missing
