@@ -1,8 +1,8 @@
-# Draft Release Notes: 0.1.0-rc1
+# Release Notes: 0.1.0-rc1
 
 ## Summary
 
-This draft release candidate packages the first feature-complete engineering slice of VaultCLI. It includes the core encrypted-container workflows, hidden-volume support, authenticated verification, metadata-first read paths, and a substantially stronger hardening and documentation baseline than the original implementation backlog.
+`0.1.0-rc1` packages the first feature-complete engineering slice of VaultCLI. It includes the core encrypted-container workflows, hidden-volume support, authenticated verification, metadata-first read paths, and a much stronger hardening and documentation baseline than the original implementation backlog.
 
 ## Highlights
 
@@ -17,6 +17,7 @@ This draft release candidate packages the first feature-complete engineering sli
 
 - malformed container and hidden-region corruption coverage
 - deterministic parser mutation coverage for container and index decoding
+- adversarial byte-level index mutation coverage
 - CLI failure-path coverage for conflicting and missing passphrase sources
 - larger end-to-end stress tests across directory trees and mixed outer/hidden use
 - platform-oriented tests for path normalization and CRLF passphrase files
@@ -30,7 +31,7 @@ This draft release candidate packages the first feature-complete engineering sli
 
 ## Testing
 
-The current release-prep workflow expects:
+This RC prep slice was validated with:
 
 - `python -m poetry run ruff check .`
 - `python -m poetry run mypy vaultcli`
