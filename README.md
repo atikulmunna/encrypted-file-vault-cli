@@ -174,6 +174,7 @@ VaultCLI is not production-ready yet. Until the implementation is complete, revi
 If you plan to use this project for real secrets later, please wait for the hardening, review, and broader validation work to be completed first.
 
 See also:
+- [Usage Guide](docs/usage.md)
 - [Security Status](docs/security-status.md)
 - [Threat Model](docs/threat-model.md)
 - [Audit Prep](docs/audit-prep.md)
@@ -214,6 +215,7 @@ Current post-backlog focus:
 - documentation and release-readiness cleanup
 
 Reviewer-facing docs:
+- [Usage Guide](docs/usage.md)
 - [Security Status](docs/security-status.md)
 - [Threat Model](docs/threat-model.md)
 - [Audit Prep](docs/audit-prep.md)
