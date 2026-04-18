@@ -37,7 +37,8 @@ Before creating a tag:
 1. Verify the version in `pyproject.toml`.
 2. Verify the version in `vaultcli/__init__.py`.
 3. Prepare concise release notes using [docs/release-notes-template.md](release-notes-template.md).
-4. Make sure the notes summarize:
+4. Update or replace [docs/release-notes-0.1.0-rc1-draft.md](release-notes-0.1.0-rc1-draft.md) when preparing the first RC.
+5. Make sure the notes summarize:
    - major user-facing changes
    - security caveats that still apply
    - any migration or compatibility notes
