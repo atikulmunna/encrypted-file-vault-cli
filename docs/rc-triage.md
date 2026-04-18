@@ -11,11 +11,11 @@ At the start of this triage pass, the only old implementation issues still open 
 - `#5` Implement container reader/writer with atomic updates
 - `#14` Add CI, fuzz tests, packaging, and release hardening
 
-Those no longer describe missing work in the codebase and should be treated as stale tracker state, not live implementation gaps.
+Those no longer described missing work in the codebase and were closed during this triage pass.
 
 ## Active Open Issue Categories
 
-The current issue tracker should focus on three post-backlog themes:
+The issue tracker is now aligned around three post-backlog themes:
 
 - hardening and fuzzing follow-up
 - release-candidate preparation

@@ -22,15 +22,14 @@ VaultCLI is not a tagged release candidate yet, but it is no longer in the initi
 - no external security review or audit has been completed
 - hidden-volume deniability properties still need conservative treatment
 - more adversarial fuzzing and long-running stress coverage would still add value
-- final issue tracker triage and release notes need to match the current state exactly
+- final version and tag decision still need to match the current state exactly
 
 ## Recommended Next RC Steps
 
 1. Close or relabel completed implementation issues.
-2. Open a smaller post-backlog set of hardening and RC-prep issues.
-3. Prepare draft release notes for the first release candidate.
-4. Re-run the release checklist on a clean tree.
-5. Decide whether the next tag should be `0.1.0-rc1` or stay untagged until external review input lands.
+2. Prepare draft release notes for the first release candidate.
+3. Re-run the release checklist on a clean tree.
+4. Decide whether the next tag should be `0.1.0-rc1` or stay untagged until external review input lands.
 
 ## Conservative Read
 
