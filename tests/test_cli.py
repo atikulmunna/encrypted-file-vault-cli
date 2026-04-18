@@ -98,6 +98,31 @@ def test_create_command_rejects_multiple_passphrase_sources(tmp_path: Path, monk
     assert "Choose only one passphrase source" in result.stderr
 
 
+def test_create_command_rejects_existing_output_path(tmp_path: Path) -> None:
+    vault_path = tmp_path / "existing.vault"
+    vault_path.write_text("occupied", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        ["create", str(vault_path), "--passphrase", "ExistingPathPassphrase123!"],
+    )
+
+    assert result.exit_code != 0
+    assert "Refusing to overwrite existing vault file" in result.stderr
+
+
+def test_create_command_rejects_weak_passphrase_with_guidance(tmp_path: Path) -> None:
+    vault_path = tmp_path / "weak-create.vault"
+
+    result = runner.invoke(
+        app,
+        ["create", str(vault_path), "--passphrase", "weakpass"],
+    )
+
+    assert result.exit_code != 0
+    assert "Choose a stronger passphrase" in result.stderr
+
+
 def test_hidden_subcommand_is_registered() -> None:
     result = runner.invoke(app, ["hidden", "create", "--help"])
     hidden_help = runner.invoke(app, ["hidden", "--help"])
@@ -154,6 +179,33 @@ def test_info_command_supports_prompted_unlock(tmp_path: Path) -> None:
 
     assert result.exit_code == 0
     assert _load_json_output(result.stdout)["mode"] == "unlocked"
+
+
+def test_info_command_rejects_missing_vault_path_with_guidance(tmp_path: Path) -> None:
+    vault_path = tmp_path / "missing-info.vault"
+
+    result = runner.invoke(app, ["info", str(vault_path)])
+
+    assert result.exit_code != 0
+    assert "Vault file not found" in result.stderr
+
+
+def test_info_command_rejects_wrong_passphrase_with_guidance(tmp_path: Path) -> None:
+    vault_path = tmp_path / "wrong-pass-info.vault"
+    assert runner.invoke(
+        app,
+        ["create", str(vault_path), "--passphrase", "CorrectPassphrase123!"],
+    ).exit_code == 0
+
+    result = runner.invoke(
+        app,
+        ["info", str(vault_path), "--passphrase", "WrongPassphrase123!"],
+    )
+
+    assert result.exit_code != 0
+    assert "DEK unwrap failed authentication" in result.stderr
+    assert "Re-enter the passphrase" in result.stderr
+    assert "public metadata" in result.stderr
 
 
 def test_list_command_returns_empty_file_list_for_new_vault(tmp_path: Path) -> None:
@@ -323,6 +375,55 @@ def test_add_and_extract_support_passphrase_file(tmp_path: Path) -> None:
     )
     assert extract_result.exit_code == 0
     assert (output_dir / "note.txt").read_text(encoding="utf-8") == "file passphrase"
+
+
+def test_add_command_rejects_missing_source_with_guidance(tmp_path: Path) -> None:
+    vault_path = tmp_path / "missing-source.vault"
+    missing_source = tmp_path / "does-not-exist.txt"
+    assert runner.invoke(
+        app,
+        ["create", str(vault_path), "--passphrase", "MissingSourcePassphrase123!"],
+    ).exit_code == 0
+
+    result = runner.invoke(
+        app,
+        [
+            "add",
+            str(vault_path),
+            str(missing_source),
+            "--passphrase",
+            "MissingSourcePassphrase123!",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "Source path does not exist or is unsupported" in result.stderr
+
+
+def test_add_command_rejects_wrong_passphrase_with_guidance(tmp_path: Path) -> None:
+    vault_path = tmp_path / "wrong-pass-add.vault"
+    source_file = tmp_path / "note.txt"
+    source_file.write_text("payload", encoding="utf-8")
+    assert runner.invoke(
+        app,
+        ["create", str(vault_path), "--passphrase", "CorrectPassphrase123!"],
+    ).exit_code == 0
+
+    result = runner.invoke(
+        app,
+        [
+            "add",
+            str(vault_path),
+            str(source_file),
+            "--passphrase",
+            "WrongPassphrase123!",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "DEK unwrap failed authentication" in result.stderr
+    assert "Re-enter the outer" in result.stderr
+    assert "passphrase" in result.stderr
 
 
 def test_extract_all_command_recovers_directory_tree(tmp_path: Path) -> None:
@@ -651,6 +752,54 @@ def test_rekey_command_supports_env_and_file_sources(tmp_path: Path, monkeypatch
         ).exit_code
         == 0
     )
+
+
+def test_rekey_command_rejects_wrong_current_passphrase_with_guidance(tmp_path: Path) -> None:
+    vault_path = tmp_path / "wrong-current-rekey.vault"
+    assert runner.invoke(
+        app,
+        ["create", str(vault_path), "--passphrase", "CorrectPassphrase123!"],
+    ).exit_code == 0
+
+    result = runner.invoke(
+        app,
+        [
+            "rekey",
+            str(vault_path),
+            "--current-passphrase",
+            "WrongPassphrase123!",
+            "--new-passphrase",
+            "NewPassphrase123!",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "DEK unwrap failed authentication" in result.stderr
+    assert "Re-enter the current" in result.stderr
+    assert "passphrase" in result.stderr
+
+
+def test_rekey_command_rejects_weak_new_passphrase_with_guidance(tmp_path: Path) -> None:
+    vault_path = tmp_path / "weak-new-rekey.vault"
+    assert runner.invoke(
+        app,
+        ["create", str(vault_path), "--passphrase", "CorrectPassphrase123!"],
+    ).exit_code == 0
+
+    result = runner.invoke(
+        app,
+        [
+            "rekey",
+            str(vault_path),
+            "--current-passphrase",
+            "CorrectPassphrase123!",
+            "--new-passphrase",
+            "weakpass",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "--allow-weak-passphrase" in result.stderr
 
 
 def test_wipe_command_removes_file(tmp_path: Path) -> None:

@@ -9,6 +9,7 @@ import typer
 from vaultcli.cli.output import emit
 from vaultcli.cli.passphrases import require_named_passphrase
 from vaultcli.cli.state import AppState
+from vaultcli.errors import ContainerFormatError, CryptoAuthenticationError, WeakPassphraseError
 from vaultcli.vault import VaultService
 
 
@@ -70,12 +71,27 @@ def rekey_command(
         prompt_text="New vault passphrase",
         confirm=True,
     )
-    updated_path = VaultService.rekey_vault(
-        vault_path,
-        current_passphrase=resolved_current_passphrase,
-        new_passphrase=resolved_new_passphrase,
-        allow_weak_passphrase=allow_weak_passphrase,
-    )
+    try:
+        updated_path = VaultService.rekey_vault(
+            vault_path,
+            current_passphrase=resolved_current_passphrase,
+            new_passphrase=resolved_new_passphrase,
+            allow_weak_passphrase=allow_weak_passphrase,
+        )
+    except FileNotFoundError as exc:
+        raise typer.BadParameter(
+            f"Vault file not found: {vault_path}. Create it first or check the path."
+        ) from exc
+    except CryptoAuthenticationError as exc:
+        raise typer.BadParameter(
+            f"{exc} Re-enter the current passphrase and try again."
+        ) from exc
+    except WeakPassphraseError as exc:
+        raise typer.BadParameter(
+            f"{exc} Choose a stronger new passphrase or pass --allow-weak-passphrase."
+        ) from exc
+    except ContainerFormatError as exc:
+        raise typer.BadParameter(str(exc)) from exc
     emit(
         {
             "vault": str(updated_path),

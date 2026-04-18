@@ -9,6 +9,7 @@ import typer
 from vaultcli.cli.output import emit
 from vaultcli.cli.passphrases import require_passphrase
 from vaultcli.cli.state import AppState
+from vaultcli.errors import ContainerFormatError, CryptoAuthenticationError
 from vaultcli.vault import VaultService
 
 
@@ -41,11 +42,22 @@ def add_command(
         file_path=passphrase_file,
         prompt_text="Vault passphrase",
     )
-    added_files = VaultService.add_paths(
-        vault_path,
-        passphrase=resolved_passphrase,
-        sources=sources,
-    )
+    try:
+        added_files = VaultService.add_paths(
+            vault_path,
+            passphrase=resolved_passphrase,
+            sources=sources,
+        )
+    except FileNotFoundError as exc:
+        raise typer.BadParameter(
+            f"Vault file not found: {vault_path}. Create it first or check the path."
+        ) from exc
+    except CryptoAuthenticationError as exc:
+        raise typer.BadParameter(
+            f"{exc} Re-enter the outer passphrase and try again."
+        ) from exc
+    except ContainerFormatError as exc:
+        raise typer.BadParameter(str(exc)) from exc
     emit(
         {
             "vault": str(vault_path),

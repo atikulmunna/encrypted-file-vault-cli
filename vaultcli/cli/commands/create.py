@@ -10,6 +10,7 @@ from vaultcli.cli.output import emit
 from vaultcli.cli.passphrases import require_passphrase
 from vaultcli.cli.state import AppState
 from vaultcli.crypto.kdf import KdfProfileName
+from vaultcli.errors import WeakPassphraseError
 from vaultcli.vault import VaultService
 
 
@@ -41,6 +42,11 @@ def create_command(
 ) -> None:
     """Create a new outer vault and prompt for a passphrase if needed."""
     state = ctx.obj if isinstance(ctx.obj, AppState) else AppState()
+    if output_path.exists():
+        raise typer.BadParameter(
+            f"Refusing to overwrite existing vault file: {output_path}. "
+            "Choose a new path or remove the existing file first."
+        )
     resolved_passphrase = require_passphrase(
         direct=passphrase,
         env_name=passphrase_env,
@@ -48,11 +54,16 @@ def create_command(
         prompt_text="Vault passphrase",
         confirm=True,
     )
-    created_path = VaultService.create_empty_vault(
-        output_path,
-        passphrase=resolved_passphrase,
-        kdf_profile=kdf_profile,
-    )
+    try:
+        created_path = VaultService.create_empty_vault(
+            output_path,
+            passphrase=resolved_passphrase,
+            kdf_profile=kdf_profile,
+        )
+    except WeakPassphraseError as exc:
+        raise typer.BadParameter(
+            f"{exc} Choose a stronger passphrase for vault creation."
+        ) from exc
     emit(
         {
             "command": "create",

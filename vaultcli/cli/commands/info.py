@@ -9,6 +9,7 @@ import typer
 from vaultcli.cli.output import emit
 from vaultcli.cli.passphrases import resolve_passphrase
 from vaultcli.cli.state import AppState
+from vaultcli.errors import ContainerFormatError, CryptoAuthenticationError
 from vaultcli.vault import VaultService
 
 
@@ -47,7 +48,14 @@ def info_command(
         allow_prompt=prompt_passphrase,
     )
     if resolved_passphrase is None:
-        locked_info = VaultService.read_locked_info(vault_path)
+        try:
+            locked_info = VaultService.read_locked_info(vault_path)
+        except FileNotFoundError as exc:
+            raise typer.BadParameter(
+                f"Vault file not found: {vault_path}. Create it first or check the path."
+            ) from exc
+        except ContainerFormatError as exc:
+            raise typer.BadParameter(str(exc)) from exc
         emit(
             {
                 "vault": str(locked_info.path),
@@ -60,7 +68,19 @@ def info_command(
         )
         return
 
-    unlocked_info = VaultService.read_unlocked_info(vault_path, passphrase=resolved_passphrase)
+    try:
+        unlocked_info = VaultService.read_unlocked_info(vault_path, passphrase=resolved_passphrase)
+    except FileNotFoundError as exc:
+        raise typer.BadParameter(
+            f"Vault file not found: {vault_path}. Create it first or check the path."
+        ) from exc
+    except CryptoAuthenticationError as exc:
+        raise typer.BadParameter(
+            f"{exc} Re-enter the passphrase or run `vault info` without unlocking "
+            "to read only public metadata."
+        ) from exc
+    except ContainerFormatError as exc:
+        raise typer.BadParameter(str(exc)) from exc
     emit(
         {
             "vault": str(unlocked_info.path),
