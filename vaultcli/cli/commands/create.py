@@ -40,7 +40,11 @@ def create_command(
         case_sensitive=False,
     ),
 ) -> None:
-    """Create a new outer vault and prompt for a passphrase if needed."""
+    """Create a new outer vault and prompt for a passphrase if needed.
+
+    Example:
+        vault create secrets.vault
+    """
     state = ctx.obj if isinstance(ctx.obj, AppState) else AppState()
     if output_path.exists():
         raise typer.BadParameter(

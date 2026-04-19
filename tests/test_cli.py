@@ -25,6 +25,23 @@ def test_root_help_shows_expected_commands() -> None:
     assert "hidden" in result.stdout
 
 
+def test_help_shows_examples_for_key_commands() -> None:
+    create_help = runner.invoke(app, ["create", "--help"])
+    extract_help = runner.invoke(app, ["extract", "--help"])
+    hidden_create_help = runner.invoke(app, ["hidden", "create", "--help"])
+
+    assert create_help.exit_code == 0
+    assert "vault create secrets.vault" in create_help.stdout
+
+    assert extract_help.exit_code == 0
+    assert "vault extract secrets.vault notes.txt" in extract_help.stdout
+    assert "--all" in extract_help.stdout
+
+    assert hidden_create_help.exit_code == 0
+    assert "vault hidden create secrets.vault" in hidden_create_help.stdout
+    assert "--hidden-size" in hidden_create_help.stdout
+
+
 def test_version_flag_shows_version() -> None:
     result = runner.invoke(app, ["--version"])
 

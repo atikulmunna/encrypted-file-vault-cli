@@ -34,7 +34,11 @@ def add_command(
         help="Path to a UTF-8 text file containing the vault passphrase.",
     ),
 ) -> None:
-    """Unlock the outer volume and add files or directories."""
+    """Unlock the outer volume and add files or directories.
+
+    Example:
+        vault add secrets.vault ./project-files --prompt-passphrase
+    """
     state = ctx.obj if isinstance(ctx.obj, AppState) else AppState()
     resolved_passphrase = require_passphrase(
         direct=passphrase,

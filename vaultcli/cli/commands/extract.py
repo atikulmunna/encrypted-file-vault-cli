@@ -52,7 +52,12 @@ def extract_command(
         help="Replace existing output files instead of failing safely.",
     ),
 ) -> None:
-    """Unlock the outer volume and extract one path or the full tree."""
+    """Unlock the outer volume and extract one path or the full tree.
+
+    Examples:
+        vault extract secrets.vault notes.txt --prompt-passphrase --output ./restore
+        vault extract secrets.vault --all --prompt-passphrase --output ./restore
+    """
     state = ctx.obj if isinstance(ctx.obj, AppState) else AppState()
     resolved_passphrase = require_passphrase(
         direct=passphrase,

@@ -42,7 +42,12 @@ def verify_command(
         help="Run structural-only verification without authenticating ciphertext.",
     ),
 ) -> None:
-    """Verify a vault in locked or authenticated mode."""
+    """Verify a vault in locked or authenticated mode.
+
+    Examples:
+        vault verify secrets.vault --locked
+        vault verify secrets.vault --prompt-passphrase
+    """
     state = ctx.obj if isinstance(ctx.obj, AppState) else AppState()
     if locked:
         result = VaultService.verify_locked(vault_path)

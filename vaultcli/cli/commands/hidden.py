@@ -73,7 +73,13 @@ def hidden_create_command(
         help="Override the default minimum passphrase policy for the hidden passphrase.",
     ),
 ) -> None:
-    """Create a hidden volume."""
+    """Create a hidden volume.
+
+    Example:
+        vault hidden create secrets.vault --hidden-size 1048576
+        --outer-passphrase-env OUTER_PASS
+        --inner-passphrase-file ./hidden-passphrase.txt
+    """
     state = ctx.obj if isinstance(ctx.obj, AppState) else AppState()
     resolved_outer_passphrase = require_named_passphrase(
         option_name="outer-passphrase",
@@ -421,7 +427,13 @@ def hidden_add_command(
         help="Path to a UTF-8 text file containing the hidden-volume passphrase.",
     ),
 ) -> None:
-    """Add files or directories to the hidden volume."""
+    """Add files or directories to the hidden volume.
+
+    Example:
+        vault hidden add secrets.vault ./inner.txt
+        --outer-passphrase-env OUTER_PASS
+        --inner-passphrase-file ./hidden-passphrase.txt
+    """
     state = ctx.obj if isinstance(ctx.obj, AppState) else AppState()
     resolved_outer_passphrase = require_named_passphrase(
         option_name="outer-passphrase",
