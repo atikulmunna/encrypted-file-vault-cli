@@ -850,6 +850,100 @@ def test_hidden_create_command_reserves_hidden_region(tmp_path: Path) -> None:
     assert info_payload["mode"] == "locked"
 
 
+def test_hidden_create_rejects_duplicate_hidden_volume_with_guidance(tmp_path: Path) -> None:
+    vault_path = tmp_path / "hidden-duplicate.vault"
+    assert runner.invoke(
+        app,
+        ["create", str(vault_path), "--passphrase", "OuterPassphrase123!"],
+    ).exit_code == 0
+    assert runner.invoke(
+        app,
+        [
+            "hidden",
+            "create",
+            str(vault_path),
+            "--hidden-size",
+            "2048",
+            "--outer-passphrase",
+            "OuterPassphrase123!",
+            "--inner-passphrase",
+            "InnerPassphrase123!",
+        ],
+    ).exit_code == 0
+
+    result = runner.invoke(
+        app,
+        [
+            "hidden",
+            "create",
+            str(vault_path),
+            "--hidden-size",
+            "2048",
+            "--outer-passphrase",
+            "OuterPassphrase123!",
+            "--inner-passphrase",
+            "AnotherInnerPassphrase123!",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "Hidden volume already configured" in result.stderr
+
+
+def test_hidden_create_rejects_wrong_outer_passphrase_with_guidance(tmp_path: Path) -> None:
+    vault_path = tmp_path / "hidden-wrong-outer.vault"
+    assert runner.invoke(
+        app,
+        ["create", str(vault_path), "--passphrase", "OuterPassphrase123!"],
+    ).exit_code == 0
+
+    result = runner.invoke(
+        app,
+        [
+            "hidden",
+            "create",
+            str(vault_path),
+            "--hidden-size",
+            "2048",
+            "--outer-passphrase",
+            "WrongOuterPassphrase123!",
+            "--inner-passphrase",
+            "InnerPassphrase123!",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "DEK unwrap failed authentication" in result.stderr
+    assert "Re-enter the outer" in result.stderr
+    assert "passphrase" in result.stderr
+
+
+def test_hidden_create_rejects_weak_inner_passphrase_with_guidance(tmp_path: Path) -> None:
+    vault_path = tmp_path / "hidden-weak-inner.vault"
+    assert runner.invoke(
+        app,
+        ["create", str(vault_path), "--passphrase", "OuterPassphrase123!"],
+    ).exit_code == 0
+
+    result = runner.invoke(
+        app,
+        [
+            "hidden",
+            "create",
+            str(vault_path),
+            "--hidden-size",
+            "2048",
+            "--outer-passphrase",
+            "OuterPassphrase123!",
+            "--inner-passphrase",
+            "weakpass",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "--allow-weak-passphrase" in result.stderr
+
+
 def test_hidden_add_list_and_extract_commands_round_trip_file(tmp_path: Path) -> None:
     vault_path = tmp_path / "hidden-roundtrip-cli.vault"
     hidden_source = tmp_path / "inner.txt"
@@ -1065,6 +1159,69 @@ def test_hidden_info_and_verify_commands_report_authenticated_metadata(tmp_path:
     assert _load_json_output(info_result.stdout)["files"] == 1
     assert _load_json_output(verify_result.stdout)["active_volume"] == "hidden"
     assert _load_json_output(verify_result.stdout)["status"] == "verified"
+
+
+def test_hidden_info_rejects_missing_hidden_volume_with_guidance(tmp_path: Path) -> None:
+    vault_path = tmp_path / "hidden-info-missing-hidden.vault"
+    assert runner.invoke(
+        app,
+        ["create", str(vault_path), "--passphrase", "OuterPassphrase123!"],
+    ).exit_code == 0
+
+    result = runner.invoke(
+        app,
+        [
+            "hidden",
+            "info",
+            str(vault_path),
+            "--outer-passphrase",
+            "OuterPassphrase123!",
+            "--inner-passphrase",
+            "InnerPassphrase123!",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "No hidden volume is configured" in result.stderr
+
+
+def test_hidden_verify_rejects_wrong_inner_passphrase_with_guidance(tmp_path: Path) -> None:
+    vault_path = tmp_path / "hidden-wrong-inner-verify.vault"
+    assert runner.invoke(
+        app,
+        ["create", str(vault_path), "--passphrase", "OuterPassphrase123!"],
+    ).exit_code == 0
+    assert runner.invoke(
+        app,
+        [
+            "hidden",
+            "create",
+            str(vault_path),
+            "--hidden-size",
+            "2048",
+            "--outer-passphrase",
+            "OuterPassphrase123!",
+            "--inner-passphrase",
+            "InnerPassphrase123!",
+        ],
+    ).exit_code == 0
+
+    result = runner.invoke(
+        app,
+        [
+            "hidden",
+            "verify",
+            str(vault_path),
+            "--outer-passphrase",
+            "OuterPassphrase123!",
+            "--inner-passphrase",
+            "WrongInnerPassphrase123!",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "Hidden volume unlock failed" in result.stderr
+    assert "Re-enter the outer and inner" in result.stderr
 
 
 def test_hidden_info_and_verify_support_env_and_file_sources(
@@ -1289,6 +1446,74 @@ def test_hidden_add_does_not_change_outer_cli_listing(tmp_path: Path) -> None:
     assert hidden_list_result.exit_code == 0
     assert _load_json_output(outer_list_result.stdout)["files"][0]["path"] == "outer.txt"
     assert _load_json_output(hidden_list_result.stdout)["files"][0]["path"] == "hidden.txt"
+
+
+def test_hidden_add_rejects_missing_hidden_volume_with_guidance(tmp_path: Path) -> None:
+    vault_path = tmp_path / "hidden-add-no-hidden.vault"
+    hidden_source = tmp_path / "hidden.txt"
+    hidden_source.write_text("hidden source", encoding="utf-8")
+    assert runner.invoke(
+        app,
+        ["create", str(vault_path), "--passphrase", "OuterPassphrase123!"],
+    ).exit_code == 0
+
+    result = runner.invoke(
+        app,
+        [
+            "hidden",
+            "add",
+            str(vault_path),
+            str(hidden_source),
+            "--outer-passphrase",
+            "OuterPassphrase123!",
+            "--inner-passphrase",
+            "InnerPassphrase123!",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "No hidden volume is configured" in result.stderr
+
+
+def test_hidden_add_rejects_full_hidden_volume_with_guidance(tmp_path: Path) -> None:
+    vault_path = tmp_path / "hidden-add-full.vault"
+    hidden_source = tmp_path / "large-hidden.txt"
+    hidden_source.write_text("x" * 4096, encoding="utf-8")
+    assert runner.invoke(
+        app,
+        ["create", str(vault_path), "--passphrase", "OuterPassphrase123!"],
+    ).exit_code == 0
+    assert runner.invoke(
+        app,
+        [
+            "hidden",
+            "create",
+            str(vault_path),
+            "--hidden-size",
+            "512",
+            "--outer-passphrase",
+            "OuterPassphrase123!",
+            "--inner-passphrase",
+            "InnerPassphrase123!",
+        ],
+    ).exit_code == 0
+
+    result = runner.invoke(
+        app,
+        [
+            "hidden",
+            "add",
+            str(vault_path),
+            str(hidden_source),
+            "--outer-passphrase",
+            "OuterPassphrase123!",
+            "--inner-passphrase",
+            "InnerPassphrase123!",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "Hidden volume is full" in result.stderr
 
 
 def test_hidden_commands_support_env_and_file_passphrases(tmp_path: Path, monkeypatch) -> None:

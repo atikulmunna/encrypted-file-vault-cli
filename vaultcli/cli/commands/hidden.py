@@ -9,7 +9,13 @@ import typer
 from vaultcli.cli.output import emit
 from vaultcli.cli.passphrases import require_named_passphrase
 from vaultcli.cli.state import AppState
-from vaultcli.errors import ContainerFormatError, VaultFileNotFoundError
+from vaultcli.errors import (
+    ContainerFormatError,
+    CryptoAuthenticationError,
+    HiddenVolumeError,
+    VaultFileNotFoundError,
+    WeakPassphraseError,
+)
 from vaultcli.vault import VaultService
 
 app = typer.Typer(
@@ -84,13 +90,30 @@ def hidden_create_command(
         prompt_text="Hidden volume passphrase",
         confirm=True,
     )
-    created_path = VaultService.create_hidden_volume(
-        vault_path,
-        outer_passphrase=resolved_outer_passphrase,
-        inner_passphrase=resolved_inner_passphrase,
-        hidden_size=hidden_size,
-        allow_weak_passphrase=allow_weak_passphrase,
-    )
+    try:
+        created_path = VaultService.create_hidden_volume(
+            vault_path,
+            outer_passphrase=resolved_outer_passphrase,
+            inner_passphrase=resolved_inner_passphrase,
+            hidden_size=hidden_size,
+            allow_weak_passphrase=allow_weak_passphrase,
+        )
+    except FileNotFoundError as exc:
+        raise typer.BadParameter(
+            f"Vault file not found: {vault_path}. Create the outer vault first or check the path."
+        ) from exc
+    except CryptoAuthenticationError as exc:
+        raise typer.BadParameter(
+            f"{exc} Re-enter the outer passphrase and try again."
+        ) from exc
+    except WeakPassphraseError as exc:
+        raise typer.BadParameter(
+            f"{exc} Choose a stronger hidden passphrase or pass --allow-weak-passphrase."
+        ) from exc
+    except HiddenVolumeError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    except ContainerFormatError as exc:
+        raise typer.BadParameter(str(exc)) from exc
     emit(
         {
             "command": "hidden create",
@@ -155,11 +178,24 @@ def hidden_list_command(
         file_path=inner_passphrase_file,
         prompt_text="Hidden volume passphrase",
     )
-    files = VaultService.list_hidden_files(
-        vault_path,
-        outer_passphrase=resolved_outer_passphrase,
-        inner_passphrase=resolved_inner_passphrase,
-    )
+    try:
+        files = VaultService.list_hidden_files(
+            vault_path,
+            outer_passphrase=resolved_outer_passphrase,
+            inner_passphrase=resolved_inner_passphrase,
+        )
+    except FileNotFoundError as exc:
+        raise typer.BadParameter(
+            f"Vault file not found: {vault_path}. Create the outer vault first or check the path."
+        ) from exc
+    except CryptoAuthenticationError as exc:
+        raise typer.BadParameter(
+            f"{exc} Re-enter the outer and inner passphrases and try again."
+        ) from exc
+    except HiddenVolumeError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    except ContainerFormatError as exc:
+        raise typer.BadParameter(str(exc)) from exc
     emit(
         {
             "vault": str(vault_path),
@@ -230,11 +266,24 @@ def hidden_info_command(
         file_path=inner_passphrase_file,
         prompt_text="Hidden volume passphrase",
     )
-    info = VaultService.read_hidden_info(
-        vault_path,
-        outer_passphrase=resolved_outer_passphrase,
-        inner_passphrase=resolved_inner_passphrase,
-    )
+    try:
+        info = VaultService.read_hidden_info(
+            vault_path,
+            outer_passphrase=resolved_outer_passphrase,
+            inner_passphrase=resolved_inner_passphrase,
+        )
+    except FileNotFoundError as exc:
+        raise typer.BadParameter(
+            f"Vault file not found: {vault_path}. Create the outer vault first or check the path."
+        ) from exc
+    except CryptoAuthenticationError as exc:
+        raise typer.BadParameter(
+            f"{exc} Re-enter the outer and inner passphrases and try again."
+        ) from exc
+    except HiddenVolumeError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    except ContainerFormatError as exc:
+        raise typer.BadParameter(str(exc)) from exc
     emit(
         {
             "vault": str(info.path),
@@ -303,11 +352,24 @@ def hidden_verify_command(
         file_path=inner_passphrase_file,
         prompt_text="Hidden volume passphrase",
     )
-    result = VaultService.verify_hidden(
-        vault_path,
-        outer_passphrase=resolved_outer_passphrase,
-        inner_passphrase=resolved_inner_passphrase,
-    )
+    try:
+        result = VaultService.verify_hidden(
+            vault_path,
+            outer_passphrase=resolved_outer_passphrase,
+            inner_passphrase=resolved_inner_passphrase,
+        )
+    except FileNotFoundError as exc:
+        raise typer.BadParameter(
+            f"Vault file not found: {vault_path}. Create the outer vault first or check the path."
+        ) from exc
+    except CryptoAuthenticationError as exc:
+        raise typer.BadParameter(
+            f"{exc} Re-enter the outer and inner passphrases and try again."
+        ) from exc
+    except HiddenVolumeError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    except ContainerFormatError as exc:
+        raise typer.BadParameter(str(exc)) from exc
     emit(
         {
             "vault": str(vault_path),
@@ -375,12 +437,25 @@ def hidden_add_command(
         file_path=inner_passphrase_file,
         prompt_text="Hidden volume passphrase",
     )
-    added_files = VaultService.add_hidden_paths(
-        vault_path,
-        outer_passphrase=resolved_outer_passphrase,
-        inner_passphrase=resolved_inner_passphrase,
-        sources=sources,
-    )
+    try:
+        added_files = VaultService.add_hidden_paths(
+            vault_path,
+            outer_passphrase=resolved_outer_passphrase,
+            inner_passphrase=resolved_inner_passphrase,
+            sources=sources,
+        )
+    except FileNotFoundError as exc:
+        raise typer.BadParameter(
+            f"Vault file not found: {vault_path}. Create the outer vault first or check the path."
+        ) from exc
+    except CryptoAuthenticationError as exc:
+        raise typer.BadParameter(
+            f"{exc} Re-enter the outer and inner passphrases and try again."
+        ) from exc
+    except HiddenVolumeError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    except ContainerFormatError as exc:
+        raise typer.BadParameter(str(exc)) from exc
     emit(
         {
             "vault": str(vault_path),
@@ -476,7 +551,17 @@ def hidden_extract_command(
             extract_all=extract_all,
             overwrite=overwrite,
         )
-    except (ContainerFormatError, VaultFileNotFoundError) as exc:
+    except (ContainerFormatError, VaultFileNotFoundError, HiddenVolumeError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise typer.BadParameter(
+            f"Vault file not found: {vault_path}. Create the outer vault first or check the path."
+        ) from exc
+    except CryptoAuthenticationError as exc:
+        raise typer.BadParameter(
+            f"{exc} Re-enter the outer and inner passphrases and try again."
+        ) from exc
+    except WeakPassphraseError as exc:
         raise typer.BadParameter(str(exc)) from exc
     emit(
         {
