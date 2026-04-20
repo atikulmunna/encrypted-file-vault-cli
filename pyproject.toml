@@ -30,7 +30,7 @@ argon2-cffi = "^25.1.0"
 cryptography = "^44.0.0"
 msgpack = "^1.1.2"
 rich = "^14.1.0"
-typer = "^0.17.4"
+typer = "^0.24.1"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.4.0"
