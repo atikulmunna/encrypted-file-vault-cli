@@ -108,6 +108,28 @@ python -m poetry run vault list secrets.vault --passphrase-env VAULTCLI_PASSPHRA
 python -m poetry run vault rekey secrets.vault --current-passphrase-env VAULTCLI_PASSPHRASE --new-passphrase-file .\new-passphrase.txt
 ```
 
+## How It Works
+
+VaultCLI uses a container workflow rather than encrypting files in place.
+
+1. You start with a normal plaintext source file such as `notes.txt`.
+2. `vault add` reads that file and stores an encrypted copy inside `smoke.vault` or another vault container.
+3. The original source file stays on disk unchanged unless you remove it yourself.
+4. `vault list`, `vault info`, and `vault verify` inspect or validate the encrypted container.
+5. `vault extract` restores a plaintext copy into an output directory such as `restore\notes.txt`.
+
+The same model applies to hidden volumes:
+
+- `inner.txt` is the original plaintext source file
+- the encrypted hidden copy is stored inside the hidden portion of the vault container
+- `hidden-restore\inner.txt` is the decrypted output restored from that hidden data
+
+In short:
+
+- source file = plaintext input
+- `*.vault` = encrypted container
+- extracted file = restored plaintext output
+
 ## Project Status
 
 VaultCLI is currently in the active hardening and polish stage.
