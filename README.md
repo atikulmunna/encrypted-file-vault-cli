@@ -204,6 +204,7 @@ See also:
 - [Security Status](docs/security-status.md)
 - [Threat Model](docs/threat-model.md)
 - [Audit Prep](docs/audit-prep.md)
+- [Next Phase Checklist](docs/next-phase-checklist.md)
 
 Current caveats:
 - Hidden-volume support exists, but plausible-deniability claims should be treated as provisional until the format and threat model receive deeper external review.
@@ -246,6 +247,7 @@ Reviewer-facing docs:
 - [Threat Model](docs/threat-model.md)
 - [Audit Prep](docs/audit-prep.md)
 - [Code Map](docs/code-map.md)
+- [Next Phase Checklist](docs/next-phase-checklist.md)
 - [RC Triage](docs/rc-triage.md)
 - [RC Status](docs/release-candidate-status.md)
 - [Release Checklist](docs/release-checklist.md)
