@@ -152,6 +152,7 @@ Track progress here:
 python -m poetry install
 python -m poetry run vault --help
 .\scripts\smoke-test.ps1
+.\scripts\release-check.ps1
 python -m poetry run ruff check .
 python -m poetry run mypy vaultcli
 python -m poetry run pytest --cov=vaultcli --cov-report=term-missing
@@ -168,6 +169,18 @@ Keep the temporary vault artifacts for inspection:
 
 ```powershell
 .\scripts\smoke-test.ps1 -KeepArtifacts
+```
+
+One-command release-style validation:
+
+```powershell
+.\scripts\release-check.ps1
+```
+
+Keep the smoke-test artifacts from the release check:
+
+```powershell
+.\scripts\release-check.ps1 -KeepSmokeArtifacts
 ```
 
 The SRS and private working notes are intentionally kept out of git. Public development work is tracked through issues, source, tests, CI, and release notes.

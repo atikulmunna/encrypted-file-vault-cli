@@ -20,6 +20,10 @@ Run all of the following locally:
 3. `python -m poetry run pytest --cov=vaultcli --cov-report=term-missing`
 4. `python -m poetry build`
 
+Or run the bundled one-command release check:
+
+1. `.\scripts\release-check.ps1`
+
 ## Documentation Review
 
 Before a tag:
